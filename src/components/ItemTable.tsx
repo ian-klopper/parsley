@@ -173,7 +173,7 @@ const ItemTableRow = ({
 }: {
   item: FoodItem,
   index: number,
-  handleItemChange: (index: number, field: string, value: any) => void,
+  handleItemChange: (index: number, field: string, value: string | { size: string; price: string }[]) => void,
   handleDeleteItem: (index: number) => void,
   handleAddMenu: (itemIndex: number, menu: string) => void,
   handleDeleteMenu: (itemIndex: number, menuToDelete: string) => void,
@@ -330,7 +330,7 @@ const ItemTableRow = ({
 export const ItemTable = ({ items, onItemsChange }: { items: FoodItem[], onItemsChange: (items: FoodItem[]) => void }) => {
   const [hoveredColumn, setHoveredColumn] = useState<string | null>(null);
 
-  const handleItemChange = (index: number, field: string, value: any) => {
+  const handleItemChange = (index: number, field: string, value: string | { size: string; price: string }[]) => {
     const newItems = [...items];
     (newItems[index] as any)[field] = value;
     onItemsChange(newItems);
