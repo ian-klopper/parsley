@@ -10,7 +10,7 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 export default function TestSupabase() {
   const [connectionStatus, setConnectionStatus] = useState<string>('Testing...')
   const [error, setError] = useState<string | null>(null)
-  const [tables, setTables] = useState<Record<string, unknown>[]>([])
+  const [tables, setTables] = useState<any[]>([])
 
   useEffect(() => {
     async function testConnection() {

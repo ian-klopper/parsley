@@ -439,7 +439,7 @@ export const ItemTable = ({ items, onItemsChange }: { items: FoodItem[], onItems
                 <Table>
                   <TableBody>
                     {menuItems.map((item) => {
-                      const index = items.findIndex(i => i === item);
+                      const index = items.findIndex((i: FoodItem) => i === item);
                       return (
                         <ItemTableRow
                           key={index}
@@ -467,6 +467,13 @@ export const ItemTable = ({ items, onItemsChange }: { items: FoodItem[], onItems
                 </div>
               </CollapsibleContent>
             </Collapsible>
+          ))}
+        </div>
+      </TooltipProvider>
+    </div>
+  );
+};
+lapsible>
           ))}
         </div>
       </TooltipProvider>
