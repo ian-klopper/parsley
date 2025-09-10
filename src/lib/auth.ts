@@ -1,10 +1,34 @@
 import { supabase } from './supabase'
 
 export async function signInWithGoogle() {
+  const isLocal = typeof window !== 'undefined' && (
+    window.location.hostname === 'localhost' || 
+    window.location.hostname === '127.0.0.1'
+  );
+  
+  const isCloudWorkstation = typeof window !== 'undefined' && 
+    window.location.hostname.includes('cloudworkstations.dev');
+  
+  let baseUrl;
+  if (isLocal) {
+    baseUrl = `http://localhost:8080`;
+  } else if (isCloudWorkstation) {
+    baseUrl = `https://${window.location.host}`;
+  } else {
+    baseUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  }
+    
+  const redirectTo = `${baseUrl}/auth/callback`;
+  console.log('Auth redirectTo:', redirectTo, { isLocal, isCloudWorkstation, baseUrl });
+  
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+      redirectTo,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
+      }
     }
   })
   

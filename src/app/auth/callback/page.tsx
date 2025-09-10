@@ -18,19 +18,63 @@ export default function AuthCallback() {
     const handleAuthCallback = async () => {
       try {
         addDebugInfo('🔄 Starting auth callback processing...')
+        addDebugInfo(`📍 Current URL: ${window.location.href}`)
         
-        // Check URL for auth tokens
+        // Check URL for auth tokens in both hash and search params
         const urlHash = window.location.hash
-        addDebugInfo(`📍 Current URL hash: ${urlHash ? urlHash.substring(0, 100) + '...' : 'No hash'}`)
+        const urlSearch = window.location.search
+        addDebugInfo(`📍 URL hash: ${urlHash ? urlHash.substring(0, 100) + '...' : 'No hash'}`)
+        addDebugInfo(`📍 URL search: ${urlSearch ? urlSearch.substring(0, 100) + '...' : 'No search params'}`)
         
-        // Check if we have tokens in the URL
-        const hasTokens = urlHash.includes('access_token')
-        addDebugInfo(`🔑 Tokens in URL: ${hasTokens ? 'YES' : 'NO'}`)
+        // Check if we have tokens in the URL (hash or search params)
+        const hasTokensInHash = urlHash.includes('access_token')
+        const hasTokensInSearch = urlSearch.includes('code=') || urlSearch.includes('access_token')
+        const hasTokens = hasTokensInHash || hasTokensInSearch
+        addDebugInfo(`🔑 Tokens in URL: ${hasTokens ? 'YES' : 'NO'} (hash: ${hasTokensInHash}, search: ${hasTokensInSearch})`)
 
         if (hasTokens) {
           addDebugInfo('🔄 Processing auth tokens from URL...')
-          // Let Supabase process the auth callback
+          
+          // Use Supabase's session from URL method for better token handling
           const { data, error } = await supabase.auth.getSession()
+          
+          // If no session from getSession, try to exchange code/tokens
+          if (!data.session && (hasTokensInHash || hasTokensInSearch)) {
+            addDebugInfo('🔄 No session from getSession, checking auth state change...')
+            
+            // Listen for auth state change
+            const { data: authData, error: authError } = await new Promise((resolve) => {
+              const unsubscribe = supabase.auth.onAuthStateChange((event, session) => {
+                addDebugInfo(`🔄 Auth state change: ${event}`)
+                if (event === 'SIGNED_IN' && session) {
+                  unsubscribe.data.subscription.unsubscribe()
+                  resolve({ data: { session }, error: null })
+                } else if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+                  // Continue waiting
+                }
+              })
+              
+              // Timeout after 10 seconds
+              setTimeout(() => {
+                unsubscribe.data.subscription.unsubscribe()
+                resolve({ data: { session: null }, error: new Error('Auth timeout') })
+              }, 10000)
+            })
+            
+            if (authError) {
+              addDebugInfo(`❌ Auth state error: ${authError.message}`)
+              setError(`Authentication failed: ${authError.message}`)
+              setTimeout(() => router.push('/?error=auth_failed'), 3000)
+              return
+            }
+            
+            if (authData.session) {
+              addDebugInfo(`✅ User authenticated via state change: ${authData.session.user.email}`)
+              addDebugInfo(`🚀 Redirecting to /jobs in 2 seconds...`)
+              setTimeout(() => router.push('/jobs'), 2000)
+              return
+            }
+          }
           
           if (error) {
             addDebugInfo(`❌ Auth error: ${error.message}`)
@@ -47,7 +91,7 @@ export default function AuthCallback() {
             setTimeout(() => router.push('/jobs'), 2000)
           } else {
             addDebugInfo('❌ No session found after processing tokens')
-            setTimeout(() => router.push('/'), 3000)
+            setTimeout(() => router.push('/?error=no_session'), 3000)
           }
         } else {
           // No tokens in URL, just check existing session
@@ -71,7 +115,7 @@ export default function AuthCallback() {
     }
 
     // Small delay to ensure the auth state is processed
-    const timer = setTimeout(handleAuthCallback, 100)
+    const timer = setTimeout(handleAuthCallback, 200)
     return () => clearTimeout(timer)
   }, [router])
 
