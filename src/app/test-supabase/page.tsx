@@ -10,13 +10,13 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 export default function TestSupabase() {
   const [connectionStatus, setConnectionStatus] = useState<string>('Testing...')
   const [error, setError] = useState<string | null>(null)
-  const [tables, setTables] = useState<any[]>([])
+  const [tables, setTables] = useState<Record<string, unknown>[]>([])
 
   useEffect(() => {
     async function testConnection() {
       try {
         // Test basic connection with a simple query
-        const { data, error } = await supabase.auth.getSession()
+        const { error } = await supabase.auth.getSession()
         
         if (error) {
           setConnectionStatus('❌ Connection Failed')
@@ -25,7 +25,7 @@ export default function TestSupabase() {
           setConnectionStatus('✅ Connection Successful')
           
           // Try to get user info
-          const { data: userData, error: userError } = await supabase.auth.getUser()
+          const { data: userData } = await supabase.auth.getUser()
           if (userData) {
             setTables([{ info: 'Auth service working', user: userData.user?.email || 'Anonymous' }])
           }
@@ -77,9 +77,9 @@ export default function TestSupabase() {
           <h2 className="text-xl font-semibold mb-2">Next Steps</h2>
           <ul className="list-disc list-inside space-y-1">
             <li>If connection is successful, you can create tables in Supabase dashboard</li>
-            <li>Create a 'jobs' table for your job management</li>
-            <li>Create a 'users' table for user data</li>
-            <li>Create a 'logs' table for activity logs</li>
+            <li>Create a &apos;jobs&apos; table for your job management</li>
+            <li>Create a &apos;users&apos; table for user data</li>
+            <li>Create a &apos;logs&apos; table for activity logs</li>
             <li>Set up Row Level Security policies for data access</li>
           </ul>
         </div>

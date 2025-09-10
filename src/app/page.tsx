@@ -36,16 +36,26 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   const handleGoogleSignIn = async () => {
+    console.log('Google sign in clicked!');
     setIsLoading(true);
     setError(null);
     
-    const result = await signInWithGoogle();
-    
-    if (!result.success) {
-      setError(result.error || 'Failed to sign in');
+    try {
+      console.log('Calling signInWithGoogle...');
+      const result = await signInWithGoogle();
+      console.log('SignInWithGoogle result:', result);
+      
+      if (!result.success) {
+        console.error('Sign in failed:', result.error);
+        setError(result.error || 'Failed to sign in');
+        setIsLoading(false);
+      }
+      // If successful, the redirect will happen automatically
+    } catch (error) {
+      console.error('Unexpected error:', error);
+      setError('An unexpected error occurred');
       setIsLoading(false);
     }
-    // If successful, the redirect will happen automatically
   };
 
   return (
