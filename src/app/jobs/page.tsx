@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, PlusCircle, LogOut, UserCog, FileText, Upload } from "lucide-react"
+import { ArrowLeft, PlusCircle, LogOut, UserCog, FileText, Upload, Crown } from "lucide-react"
 import { jobs } from "@/lib/jobs-data"
 import {
   DropdownMenu,
@@ -192,26 +192,27 @@ export default function Home() {
                     </div>
                     <div>
                       <Label>Add Collaborators</Label>
-                      <ScrollArea className="h-40 rounded-md border p-2">
-                        <div className="flex flex-col gap-4">
-                          {users.map((user) => (
-                            <div key={user.email} className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <Avatar>
-                                  <AvatarFallback style={{ backgroundColor: userColors[user.name], color: "white" }}>
-                                    {user.initials}
-                                  </AvatarFallback>
-                                </Avatar>
-                                <div>
-                                  <p className="font-medium">{user.name}</p>
-                                  <p className="text-sm text-muted-foreground">{user.email}</p>
-                                </div>
+                      <div className="flex flex-col gap-4 mt-2">
+                        {users.map((user) => (
+                          <div key={user.email} className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Avatar>
+                                <AvatarFallback style={{ backgroundColor: userColors[user.name], color: "white" }}>
+                                  {user.initials}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <p className="font-medium">{user.name}</p>
+                                <p className="text-sm text-muted-foreground">{user.email}</p>
                               </div>
-                              <Switch />
                             </div>
-                          ))}
-                        </div>
-                      </ScrollArea>
+                            <div className="flex items-center gap-4">
+                              <Switch />
+                              <Crown className="h-5 w-5 text-muted-foreground hover:text-primary transition-colors cursor-pointer" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                     <div className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-zinc-700 rounded-lg cursor-pointer hover:bg-zinc-700">
                       <Upload className="h-8 w-8 text-zinc-500" />

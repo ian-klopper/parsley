@@ -70,20 +70,17 @@ modifierGroupNames.forEach((name, i) => {
   modifierGroupColors[name] = colorSpectrum[i * 6 % colorSpectrum.length];
 });
 
-const AddNewPopover = ({ 
-  options, 
-  onAdd, 
-  searchPlaceholder,
-  trigger
-}: { 
-  options: string[], 
-  onAdd: (option: string) => void, 
-  searchPlaceholder: string,
-  trigger: React.ReactNode
-}) => {
+const SearchablePopover = ({ options, onSelect, searchPlaceholder, trigger, onAddNew }: { options: string[], onSelect: (option: string) => void, searchPlaceholder: string, trigger: React.ReactNode, onAddNew?: () => void }) => {
   const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const handleSelect = (option: string) => {
+    onSelect(option);
+    setOpen(false);
+  }
+
   return (
-    <Popover onOpenChange={() => setSearch("")}>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         {trigger}
       </PopoverTrigger>
@@ -100,16 +97,18 @@ const AddNewPopover = ({
           </div>
           <div className="max-h-48 overflow-y-auto">
             {options.filter(o => o.toLowerCase().includes(search.toLowerCase())).map(option => (
-              <Button key={option} variant="ghost" size="sm" className="w-full justify-start rounded-none" onClick={() => onAdd(option)}>
+              <Button key={option} variant="ghost" size="sm" className="w-full justify-start rounded-none" onClick={() => handleSelect(option)}>
                 {option}
               </Button>
             ))}
           </div>
-          <div className="p-2 border-t">
-            <Button variant="ghost" size="sm" className="w-full">
-              Add New
-            </Button>
-          </div>
+          {onAddNew && (
+            <div className="p-2 border-t">
+              <Button variant="ghost" size="sm" className="w-full" onClick={onAddNew}>
+                Add New
+              </Button>
+            </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>
@@ -117,17 +116,19 @@ const AddNewPopover = ({
 };
 
 const AddSizePopover = ({ onAdd, trigger }: { onAdd: (size: string, price: string) => void, trigger: React.ReactNode }) => {
+  const [open, setOpen] = useState(false);
   const [newSize, setNewSize] = useState<{ size: string; price: string }>({ size: "", price: "" });
 
   const handleAdd = () => {
     if (newSize.size && newSize.price) {
       onAdd(newSize.size, newSize.price);
       setNewSize({ size: "", price: "" });
+      setOpen(false);
     }
   };
 
   return (
-    <Popover onOpenChange={() => setNewSize({ size: "", price: "" })}>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         {trigger}
       </PopoverTrigger>
@@ -173,7 +174,7 @@ const ItemTableRow = ({
 }: {
   item: FoodItem,
   index: number,
-  handleItemChange: (index: number, field: string, value: string | { size: string; price: string }[]) => void,
+  handleItemChange: <K extends keyof FoodItem>(index: number, field: K, value: FoodItem[K]) => void,
   handleDeleteItem: (index: number) => void,
   handleAddMenu: (itemIndex: number, menu: string) => void,
   handleDeleteMenu: (itemIndex: number, menuToDelete: string) => void,
@@ -207,39 +208,17 @@ const ItemTableRow = ({
         </Tooltip>
       </TableCell>
       <TableCell className="align-top w-[15%]" onMouseEnter={() => setHoveredColumn(null)} onMouseLeave={() => setHoveredColumn(null)}>
-        <Popover>
-          <PopoverTrigger asChild>
+        <SearchablePopover
+          options={initialSubcategories}
+          onSelect={(subcategory) => handleItemChange(index, 'subcategory', subcategory)}
+          searchPlaceholder="Search..."
+          trigger={(
             <Button variant="ghost" className="w-[120px] max-w-[120px] justify-between p-0 font-normal border-none shadow-none focus:ring-0 focus-visible:ring-0 hover:bg-transparent">
               <span className="truncate">{item.subcategory || "Select"}</span>
               <ChevronDown className="h-4 w-4 opacity-0 group-hover:opacity-50" />
             </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0">
-            <div className="flex flex-col gap-2">
-              <div className="p-2 relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search..."
-                  value={subcategorySearch}
-                  onChange={(e) => setSubcategorySearch(e.target.value)}
-                  className="h-8 pl-8 focus-visible:ring-0 border-none shadow-none"
-                />
-              </div>
-              <div className="max-h-48 overflow-y-auto">
-                {initialSubcategories.filter(s => s.toLowerCase().includes(subcategorySearch.toLowerCase())).map(subcategory => (
-                  <Button key={subcategory} variant="ghost" size="sm" className="w-full justify-start rounded-none" onClick={() => handleItemChange(index, 'subcategory', subcategory)}>
-                    {subcategory}
-                  </Button>
-                ))}
-              </div>
-              <div className="p-2 border-t">
-                <Button variant="ghost" size="sm" className="w-full">
-                  Add New
-                </Button>
-              </div>
-            </div>
-          </PopoverContent>
-        </Popover>
+          )}
+        />
       </TableCell>
       <TableCell className="align-top w-[20%]" onMouseEnter={() => setHoveredColumn('menus')} onMouseLeave={() => setHoveredColumn(null)}>
         <div className="flex flex-wrap items-center gap-1">
@@ -259,11 +238,12 @@ const ItemTableRow = ({
               </div>
             </Badge>
           ))}
-          <AddNewPopover
+          <SearchablePopover
             options={menuNames}
-            onAdd={(menu) => handleAddMenu(index, menu)}
+            onSelect={(menu) => handleAddMenu(index, menu)}
             searchPlaceholder="Search menus..."
             trigger={<PlusCircle className="h-4 w-4 text-muted-foreground cursor-pointer transition-opacity opacity-0 group-hover:opacity-100" />}
+            onAddNew={() => console.log('Add new menu clicked')}
           />
         </div>
       </TableCell>
@@ -309,11 +289,12 @@ const ItemTableRow = ({
               </div>
             </Badge>
           ))}
-          <AddNewPopover
+          <SearchablePopover
             options={modifierGroupNames}
-            onAdd={(group) => handleAddModifierGroup(index, group)}
+            onSelect={(group) => handleAddModifierGroup(index, group)}
             searchPlaceholder="Search groups..."
             trigger={<PlusCircle className="h-4 w-4 text-muted-foreground cursor-pointer transition-opacity opacity-0 group-hover:opacity-100" />}
+            onAddNew={() => console.log('Add new modifier group clicked')}
           />
         </div>
       </TableCell>
@@ -330,9 +311,9 @@ const ItemTableRow = ({
 export const ItemTable = ({ items, onItemsChange }: { items: FoodItem[], onItemsChange: (items: FoodItem[]) => void }) => {
   const [hoveredColumn, setHoveredColumn] = useState<string | null>(null);
 
-  const handleItemChange = (index: number, field: string, value: string | { size: string; price: string }[]) => {
+  const handleItemChange = <K extends keyof FoodItem>(index: number, field: K, value: FoodItem[K]) => {
     const newItems = [...items];
-    (newItems[index] as any)[field] = value;
+    newItems[index][field] = value;
     onItemsChange(newItems);
   };
 
@@ -438,13 +419,13 @@ export const ItemTable = ({ items, onItemsChange }: { items: FoodItem[], onItems
               <CollapsibleContent>
                 <Table>
                   <TableBody>
-                    {menuItems.map((item) => {
-                      const index = items.findIndex((i: FoodItem) => i === item);
+                    {menuItems.map((item, index) => {
+                      const itemIndex = items.findIndex((i) => i.name === item.name);
                       return (
                         <ItemTableRow
-                          key={index}
+                          key={itemIndex}
                           item={item}
-                          index={index}
+                          index={itemIndex}
                           handleItemChange={handleItemChange}
                           handleDeleteItem={handleDeleteItem}
                           handleAddMenu={handleAddMenu}
@@ -467,13 +448,6 @@ export const ItemTable = ({ items, onItemsChange }: { items: FoodItem[], onItems
                 </div>
               </CollapsibleContent>
             </Collapsible>
-          ))}
-        </div>
-      </TooltipProvider>
-    </div>
-  );
-};
-lapsible>
           ))}
         </div>
       </TooltipProvider>
