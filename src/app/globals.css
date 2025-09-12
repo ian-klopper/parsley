@@ -89,15 +89,15 @@ body {
 
 @layer components {
   .table-container.menus-hover .menus-col {
-    background-color: var(--badge-color);
+    background-color: var(--badge-color, hsl(0 0% 50%));
     color: white;
   }
   .table-container.sizes-hover .sizes-col {
-    background-color: var(--badge-color);
+    background-color: var(--badge-color, hsl(0 0% 50%));
     color: white;
   }
   .table-container.modifiers-hover .modifiers-col {
-    background-color: var(--badge-color);
+    background-color: var(--badge-color, hsl(0 0% 50%));
     color: white;
   }
 }

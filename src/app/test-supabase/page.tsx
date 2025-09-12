@@ -7,10 +7,15 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabase = createClient(supabaseUrl, supabaseKey)
 
+interface TableInfo {
+  info: string;
+  user: string;
+}
+
 export default function TestSupabase() {
   const [connectionStatus, setConnectionStatus] = useState<string>('Testing...')
   const [error, setError] = useState<string | null>(null)
-  const [tables, setTables] = useState<any[]>([])
+  const [tables, setTables] = useState<TableInfo[]>([])
 
   useEffect(() => {
     async function testConnection() {
