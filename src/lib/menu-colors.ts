@@ -8,7 +8,9 @@ import {
 const createColorMap = (items: string[], offset: number): { [name: string]: string } => {
   const colorMap: { [name: string]: string } = {};
   items.forEach((name, i) => {
-    colorMap[name] = colorSpectrum[(i * offset) % colorSpectrum.length];
+    // Use pastel variant for consistency (can be light/dark theme agnostic)
+    const colorObj = colorSpectrum[(i * offset) % colorSpectrum.length];
+    colorMap[name] = colorObj.pastel;
   });
   return colorMap;
 };

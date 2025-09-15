@@ -36,28 +36,20 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   const handleGoogleSignIn = async () => {
-    console.log('🔄 Google sign in clicked!');
     setIsLoading(true);
     setError(null);
-    
+
     try {
-      console.log('🚀 Calling signInWithGoogle...');
-      console.log('📍 Current URL:', window.location.href);
-      
       const result = await signInWithGoogle();
-      console.log('📊 SignInWithGoogle result:', result);
-      
+
       if (!result.success) {
-        console.error('❌ Sign in failed:', result.error);
-        setError(result.error || 'Failed to sign in');
+        setError(result.error || 'Failed to sign in with Google');
         setIsLoading(false);
       } else {
-        console.log('✅ Sign in initiated successfully, waiting for redirect...');
         // If successful, the redirect will happen automatically
         // Keep loading state until redirect happens
       }
     } catch (error) {
-      console.error('💥 Unexpected error during sign in:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       setError(errorMessage);
       setIsLoading(false);
@@ -73,16 +65,16 @@ export default function LoginPage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4">
-            <Button 
-              variant="outline" 
-              className="w-full" 
+            <Button
+              variant="outline"
+              className="w-full"
               onClick={handleGoogleSignIn}
               disabled={isLoading}
             >
               <GoogleIcon className="mr-2 h-4 w-4" />
               {isLoading ? 'Signing in...' : 'Sign in with Google'}
             </Button>
-            
+
             {error && (
               <div className="text-sm text-destructive text-center">
                 {error}

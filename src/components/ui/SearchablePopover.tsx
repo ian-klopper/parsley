@@ -42,24 +42,24 @@ export const SearchablePopover = ({
       <PopoverTrigger asChild>
         {trigger}
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0">
+      <PopoverContent className="searchable-popover-content p-0">
         <div className="flex flex-col">
-          <div className="p-2 relative">
+          <div className="p-2 relative border-b-0">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder={searchPlaceholder}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="h-8 pl-8 focus-visible:ring-0 border-none shadow-none"
+              className="h-8 pl-8 focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none border-none shadow-none"
             />
           </div>
-          <div className="max-h-48 overflow-y-auto">
+          <div className="max-h-48 overflow-y-auto border-0">
             {filteredOptions.map(option => (
-              <Button 
-                key={option} 
-                variant="ghost" 
-                size="sm" 
-                className="w-full justify-start rounded-none" 
+              <Button
+                key={option}
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start rounded-none border-0"
                 onClick={() => handleSelect(option)}
               >
                 {option}
@@ -67,8 +67,8 @@ export const SearchablePopover = ({
             ))}
           </div>
           {onAddNew && (
-            <div className="p-2 border-t">
-              <Button variant="ghost" size="sm" className="w-full" onClick={onAddNew}>
+            <div className="p-2 border-0">
+              <Button variant="ghost" size="sm" className="w-full border-0" onClick={onAddNew}>
                 Add New
               </Button>
             </div>

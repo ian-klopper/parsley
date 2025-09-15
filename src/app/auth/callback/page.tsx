@@ -3,49 +3,77 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { LoadingWithTips } from '@/components/LoadingWithTips'
+import { authTips } from '@/lib/loading-tips'
+import type { User } from '@supabase/supabase-js'
+
+// Helper function to ensure user profile exists
+async function ensureUserProfile(user: User) {
+  try {
+    // Check if profile already exists
+    const { data: existingProfile, error: checkError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', user.id)
+      .single()
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      throw checkError
+    }
+
+    // If profile doesn't exist, create it
+    if (!existingProfile) {
+      const { error: createError } = await supabase
+        .from('users')
+        .insert([{
+          id: user.id,
+          email: user.email!,
+          full_name: user.user_metadata?.full_name || user.user_metadata?.name || user.email!.split('@')[0],
+          role: 'pending',
+          avatar_url: user.user_metadata?.avatar_url,
+          color_index: Math.floor(Math.random() * 12)
+        }])
+
+      if (createError) {
+        throw createError
+      }
+
+      console.log('✅ Created user profile for:', user.email)
+    }
+  } catch (error) {
+    console.error('❌ Error ensuring user profile:', error)
+    throw error
+  }
+}
 
 export default function AuthCallback() {
   const router = useRouter()
-  const [debugInfo, setDebugInfo] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
-
-  const addDebugInfo = (message: string) => {
-    console.log(`[AUTH DEBUG] ${message}`)
-    setDebugInfo(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`])
-  }
+  const [isProcessing, setIsProcessing] = useState(true)
 
   useEffect(() => {
     const handleAuthCallback = async () => {
       try {
-        addDebugInfo('🔄 Starting auth callback processing...')
-        addDebugInfo(`📍 Current URL: ${window.location.href}`)
-        
+        setIsProcessing(true)
+
         // Check URL for auth tokens in both hash and search params
         const urlHash = window.location.hash
         const urlSearch = window.location.search
-        addDebugInfo(`📍 URL hash: ${urlHash ? urlHash.substring(0, 100) + '...' : 'No hash'}`)
-        addDebugInfo(`📍 URL search: ${urlSearch ? urlSearch.substring(0, 100) + '...' : 'No search params'}`)
-        
+
         // Check if we have tokens in the URL (hash or search params)
         const hasTokensInHash = urlHash.includes('access_token')
         const hasTokensInSearch = urlSearch.includes('code=') || urlSearch.includes('access_token')
         const hasTokens = hasTokensInHash || hasTokensInSearch
-        addDebugInfo(`🔑 Tokens in URL: ${hasTokens ? 'YES' : 'NO'} (hash: ${hasTokensInHash}, search: ${hasTokensInSearch})`)
 
         if (hasTokens) {
-          addDebugInfo('🔄 Processing auth tokens from URL...')
-          
           // Use Supabase's session from URL method for better token handling
           const { data, error } = await supabase.auth.getSession()
-          
+
           // If no session from getSession, try to exchange code/tokens
           if (!data.session && (hasTokensInHash || hasTokensInSearch)) {
-            addDebugInfo('🔄 No session from getSession, checking auth state change...')
-            
             // Listen for auth state change
-            const { data: authData, error: authError } = await new Promise((resolve) => {
+            const { data: authData, error: authError } = await new Promise<{ data: { session: any }, error: Error | null }>((resolve) => {
               const unsubscribe = supabase.auth.onAuthStateChange((event, session) => {
-                addDebugInfo(`🔄 Auth state change: ${event}`)
                 if (event === 'SIGNED_IN' && session) {
                   unsubscribe.data.subscription.unsubscribe()
                   resolve({ data: { session }, error: null })
@@ -53,64 +81,101 @@ export default function AuthCallback() {
                   // Continue waiting
                 }
               })
-              
+
               // Timeout after 10 seconds
               setTimeout(() => {
                 unsubscribe.data.subscription.unsubscribe()
-                resolve({ data: { session: null }, error: new Error('Auth timeout') })
+                resolve({ data: { session: null }, error: new Error('Authentication timeout - please try signing in again') })
               }, 10000)
             })
-            
+
             if (authError) {
-              addDebugInfo(`❌ Auth state error: ${authError.message}`)
-              setError(`Authentication failed: ${authError.message}`)
-              setTimeout(() => router.push('/?error=auth_failed'), 3000)
-              return
+              throw new Error(`Authentication failed: ${authError.message}`)
             }
-            
+
             if (authData.session) {
-              addDebugInfo(`✅ User authenticated via state change: ${authData.session.user.email}`)
-              addDebugInfo(`🚀 Redirecting to /jobs in 2 seconds...`)
-              setTimeout(() => router.push('/jobs'), 2000)
+              // Check if user profile exists, create if not
+              await ensureUserProfile(authData.session.user)
+
+              // Check user role and redirect accordingly
+              const { data: profile } = await supabase
+                .from('users')
+                .select('role')
+                .eq('id', authData.session.user.id)
+                .single()
+
+              setIsProcessing(false)
+
+              if (profile?.role === 'pending') {
+                router.push('/pending')
+              } else {
+                router.push('/dashboard')
+              }
               return
             }
-          }
-          
-          if (error) {
-            addDebugInfo(`❌ Auth error: ${error.message}`)
-            setError(`Authentication failed: ${error.message}`)
-            setTimeout(() => router.push('/?error=auth_failed'), 3000)
-            return
           }
 
-          addDebugInfo(`📊 Session check result: ${data.session ? 'Session found' : 'No session'}`)
-          
+          if (error) {
+            throw new Error(`Authentication failed: ${error.message}`)
+          }
+
           if (data.session) {
-            addDebugInfo(`✅ User authenticated: ${data.session.user.email}`)
-            addDebugInfo(`🚀 Redirecting to /jobs in 2 seconds...`)
-            setTimeout(() => router.push('/jobs'), 2000)
+            // Check if user profile exists, create if not
+            await ensureUserProfile(data.session.user)
+
+            // Check user role and redirect accordingly
+            const { data: profile } = await supabase
+              .from('users')
+              .select('role')
+              .eq('id', data.session.user.id)
+              .single()
+
+            setIsProcessing(false)
+
+            if (profile?.role === 'pending') {
+              router.push('/pending')
+            } else {
+              router.push('/dashboard')
+            }
           } else {
-            addDebugInfo('❌ No session found after processing tokens')
-            setTimeout(() => router.push('/?error=no_session'), 3000)
+            throw new Error('Authentication failed - no session found')
           }
         } else {
           // No tokens in URL, just check existing session
-          addDebugInfo('🔍 No tokens in URL, checking existing session...')
           const { data } = await supabase.auth.getSession()
-          
+
           if (data.session) {
-            addDebugInfo(`✅ Existing session found: ${data.session.user.email}`)
-            router.push('/jobs')
+            // Check if user profile exists, create if not
+            await ensureUserProfile(data.session.user)
+
+            // Check user role and redirect accordingly
+            const { data: profile } = await supabase
+              .from('users')
+              .select('role')
+              .eq('id', data.session.user.id)
+              .single()
+
+            setIsProcessing(false)
+
+            if (profile?.role === 'pending') {
+              router.push('/pending')
+            } else {
+              router.push('/dashboard')
+            }
           } else {
-            addDebugInfo('❌ No existing session, redirecting to login')
+            setIsProcessing(false)
             router.push('/')
           }
         }
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Unknown error'
-        addDebugInfo(`💥 Unexpected error: ${errorMessage}`)
-        setError(`Unexpected error: ${errorMessage}`)
-        setTimeout(() => router.push('/?error=unexpected'), 3000)
+        const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred during authentication'
+        setError(errorMessage)
+        setIsProcessing(false)
+
+        // Redirect to login with error after showing error for 3 seconds
+        setTimeout(() => {
+          router.push(`/?error=${encodeURIComponent(errorMessage)}`)
+        }, 3000)
       }
     }
 
@@ -120,40 +185,29 @@ export default function AuthCallback() {
   }, [router])
 
   return (
-    <div className="min-h-screen p-8 bg-background">
-      <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <h1 className="text-2xl font-bold mb-2">Processing Authentication</h1>
-          <p className="text-muted-foreground">Please wait while we complete your sign in...</p>
-        </div>
-
-        {error && (
-          <div className="bg-destructive/10 border border-destructive text-destructive p-4 rounded-lg mb-6">
-            <h3 className="font-semibold mb-2">Authentication Error</h3>
-            <p>{error}</p>
-          </div>
-        )}
-
-        <div className="bg-card border rounded-lg p-6">
-          <h2 className="text-lg font-semibold mb-4">Debug Information</h2>
-          <div className="space-y-2 max-h-96 overflow-y-auto">
-            {debugInfo.length === 0 ? (
-              <p className="text-muted-foreground">Initializing...</p>
-            ) : (
-              debugInfo.map((info, index) => (
-                <div key={index} className="text-sm font-mono bg-muted p-2 rounded">
-                  {info}
-                </div>
-              ))
-            )}
+    <div className="min-h-screen bg-background">
+      {isProcessing ? (
+        <LoadingWithTips
+          title="Signing you in"
+          subtitle="Please wait while we complete your authentication..."
+          tips={authTips}
+          size="md"
+          className="min-h-screen p-8"
+        />
+      ) : error ? (
+        <div className="min-h-screen flex items-center justify-center p-8">
+          <div className="max-w-md mx-auto text-center">
+            <div className="text-foreground mb-6">
+              <svg className="h-12 w-12 mx-auto mb-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold mb-4 text-foreground">Authentication Error</h1>
+            <p className="text-muted-foreground mb-6">{error}</p>
+            <p className="text-sm text-muted-foreground">Redirecting you back to the login page...</p>
           </div>
         </div>
-
-        <div className="mt-6 text-center text-sm text-muted-foreground">
-          <p>Check the browser console for additional technical details</p>
-        </div>
-      </div>
+      ) : null}
     </div>
   )
 }

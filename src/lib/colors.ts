@@ -1,66 +1,19 @@
-export const colorSpectrum: string[] = [
-  "hsl(0, 85%, 35%)",
-  "hsl(5.625, 85%, 35%)",
-  "hsl(11.25, 85%, 35%)",
-  "hsl(16.875, 85%, 35%)",
-  "hsl(22.5, 85%, 35%)",
-  "hsl(28.125, 85%, 35%)",
-  "hsl(33.75, 85%, 35%)",
-  "hsl(39.375, 85%, 35%)",
-  "hsl(45, 85%, 35%)",
-  "hsl(50.625, 85%, 35%)",
-  "hsl(56.25, 85%, 35%)",
-  "hsl(61.875, 85%, 35%)",
-  "hsl(67.5, 85%, 35%)",
-  "hsl(73.125, 85%, 35%)",
-  "hsl(78.75, 85%, 35%)",
-  "hsl(84.375, 85%, 35%)",
-  "hsl(90, 85%, 35%)",
-  "hsl(95.625, 85%, 35%)",
-  "hsl(101.25, 85%, 35%)",
-  "hsl(106.875, 85%, 35%)",
-  "hsl(112.5, 85%, 35%)",
-  "hsl(118.125, 85%, 35%)",
-  "hsl(123.75, 85%, 35%)",
-  "hsl(129.375, 85%, 35%)",
-  "hsl(135, 85%, 35%)",
-  "hsl(140.625, 85%, 35%)",
-  "hsl(146.25, 85%, 35%)",
-  "hsl(151.875, 85%, 35%)",
-  "hsl(157.5, 85%, 35%)",
-  "hsl(163.125, 85%, 35%)",
-  "hsl(168.75, 85%, 35%)",
-  "hsl(174.375, 85%, 35%)",
-  "hsl(180, 85%, 35%)",
-  "hsl(185.625, 85%, 35%)",
-  "hsl(191.25, 85%, 35%)",
-  "hsl(196.875, 85%, 35%)",
-  "hsl(202.5, 85%, 35%)",
-  "hsl(208.125, 85%, 35%)",
-  "hsl(213.75, 85%, 35%)",
-  "hsl(219.375, 85%, 35%)",
-  "hsl(225, 85%, 35%)",
-  "hsl(230.625, 85%, 35%)",
-  "hsl(236.25, 85%, 35%)",
-  "hsl(241.875, 85%, 35%)",
-  "hsl(247.5, 85%, 35%)",
-  "hsl(253.125, 85%, 35%)",
-  "hsl(258.75, 85%, 35%)",
-  "hsl(264.375, 85%, 35%)",
-  "hsl(270, 85%, 35%)",
-  "hsl(275.625, 85%, 35%)",
-  "hsl(281.25, 85%, 35%)",
-  "hsl(286.875, 85%, 35%)",
-  "hsl(292.5, 85%, 35%)",
-  "hsl(298.125, 85%, 35%)",
-  "hsl(303.75, 85%, 35%)",
-  "hsl(309.375, 85%, 35%)",
-  "hsl(315, 85%, 35%)",
-  "hsl(320.625, 85%, 35%)",
-  "hsl(326.25, 85%, 35%)",
-  "hsl(331.875, 85%, 35%)",
-  "hsl(337.5, 85%, 35%)",
-  "hsl(343.125, 85%, 35%)",
-  "hsl(348.75, 85%, 35%)",
-  "hsl(354.375, 85%, 35%)"
-];
+interface ColorPair {
+  light: string;
+  dark: string;
+  pastel: string;
+  vibrant: string;
+}
+
+// Generate 64 colors across the full spectrum (360° / 64 = 5.625° steps)
+// Light theme: 90% saturation, 70% lightness (light, vibrant colors for black text)
+// Dark theme: 85% saturation, 35% lightness (dark, rich colors for white text)
+export const colorSpectrum: ColorPair[] = Array.from({ length: 64 }, (_, i) => {
+  const hue = i * 5.625; // 360° / 64 colors = 5.625° per step
+  return {
+    light: `hsl(${hue}, 90%, 70%)`,    // For light theme: light colors for black text
+    dark: `hsl(${hue}, 85%, 35%)`,     // For dark theme: dark colors for white text
+    pastel: `hsl(${hue}, 90%, 70%)`,   // Update pastel mapping to match light
+    vibrant: `hsl(${hue}, 85%, 35%)`   // Update vibrant mapping to match dark
+  };
+});

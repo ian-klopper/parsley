@@ -1,31 +1,49 @@
-import type {Metadata} from 'next';
-import './globals.css';
-import {Toaster} from '@/components/ui/toaster';
-import { AuthProvider } from '@/contexts/AuthContext';
+import type { Metadata } from 'next'
+import { Inter } from 'next/font/google'
+import './globals.css'
+import { Toaster } from '@/components/ui/toaster'
+import { AuthProvider } from '@/contexts/AuthContext'
+import { ThemeProvider } from '@/components/ThemeProvider'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { ErrorPanel } from '@/components/ErrorPanel'
+import { QueryProvider } from '@/providers/QueryProvider'
+import '@/lib/error-handler' // Initialize global error handler
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-sans',
+})
 
 export const metadata: Metadata = {
   title: 'Parsley',
   description: 'A resizable two-panel application.',
-};
+}
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="dark">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter&display=swap" rel="stylesheet" />
-      </head>
-      <body className="font-body antialiased">
-        <AuthProvider>
-          {children}
-          <Toaster />
-        </AuthProvider>
+    <html lang="en" suppressHydrationWarning>
+      <body className={`font-sans antialiased ${inter.variable}`}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <QueryProvider>
+            <AuthProvider>
+              <ErrorBoundary>
+                {children}
+                <ErrorPanel />
+              </ErrorBoundary>
+              <Toaster />
+            </AuthProvider>
+          </QueryProvider>
+        </ThemeProvider>
       </body>
     </html>
-  );
+  )
 }
