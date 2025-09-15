@@ -60,12 +60,12 @@ export async function GET(request: Request) {
         // If it's a "not found" error, this might be first-time login
         if (profileError.code === 'PGRST116' || profileError.message.includes('No rows returned')) {
           console.log('No profile found (first-time login), redirecting to dashboard')
-          return NextResponse.redirect(`${origin}/dashboard`)
+          return NextResponse.redirect(`${origin}/dashboard`, { status: 302 })
         }
 
         // For other database errors, still try dashboard but log the issue
         console.error('Database error during profile lookup, redirecting to dashboard anyway')
-        return NextResponse.redirect(`${origin}/dashboard`)
+        return NextResponse.redirect(`${origin}/dashboard`, { status: 302 })
       }
 
       console.log('User profile found:', { role: profile.role })
@@ -73,10 +73,10 @@ export async function GET(request: Request) {
       // Redirect based on role
       if (profile?.role === 'pending') {
         console.log('Redirecting to pending page')
-        return NextResponse.redirect(`${origin}/pending`)
+        return NextResponse.redirect(`${origin}/pending`, { status: 302 })
       } else {
         console.log('Redirecting to dashboard')
-        return NextResponse.redirect(`${origin}/dashboard`)
+        return NextResponse.redirect(`${origin}/dashboard`, { status: 302 })
       }
     } else {
       console.error('No user found after successful session exchange')
@@ -87,5 +87,5 @@ export async function GET(request: Request) {
 
   // Return to login page on error
   console.log('Redirecting to login page due to error')
-  return NextResponse.redirect(`${origin}/`)
+  return NextResponse.redirect(`${origin}/`, { status: 302 })
 }

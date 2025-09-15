@@ -7,7 +7,16 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   if (url.searchParams.get('redirect') === 'test') {
     console.log('Testing redirect from test-env endpoint')
-    return NextResponse.redirect(`${url.origin}/dashboard`)
+    console.log('Redirect URL:', `${url.origin}/dashboard`)
+
+    try {
+      const redirectResponse = NextResponse.redirect(`${url.origin}/dashboard`)
+      console.log('Redirect response created successfully')
+      return redirectResponse
+    } catch (error) {
+      console.error('Redirect failed:', error)
+      return NextResponse.json({ error: 'Redirect failed', message: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 })
+    }
   }
   try {
     // Check environment variables
