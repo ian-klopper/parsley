@@ -25,7 +25,7 @@ export async function GET() {
 
     console.log('Environment Variables Check:', envCheck)
 
-    // Test Supabase connection
+    // Test Supabase connection with anon key (normal client)
     const cookieStore = cookies()
     const supabase = createClient(cookieStore)
 
@@ -40,8 +40,14 @@ export async function GET() {
       } : null
     })
 
-    // Test basic database connectivity
-    const { data: dbTest, error: dbError } = await supabase
+    // Test database connectivity with service role key
+    const { createClient: createServiceClient } = await import('@supabase/supabase-js')
+    const serviceSupabase = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+
+    const { data: dbTest, error: dbError } = await serviceSupabase
       .from('users')
       .select('count')
       .limit(1)
