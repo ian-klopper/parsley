@@ -11,6 +11,14 @@ if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null ; then
     sleep 2
 fi
 
+# Load environment variables from .env.local if it exists
+if [ -f ".env.local" ]; then
+    echo "📁 Loading environment variables from .env.local"
+    set -a
+    source .env.local
+    set +a
+fi
+
 # Check environment variables
 if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
     echo "❌ Missing required environment variables"

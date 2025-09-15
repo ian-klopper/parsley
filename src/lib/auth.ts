@@ -9,10 +9,15 @@ export async function signInWithGoogle() {
   const isCloudWorkstation = typeof window !== 'undefined' &&
     window.location.hostname.includes('cloudworkstations.dev');
 
+  const isCodespaces = typeof window !== 'undefined' &&
+    window.location.hostname.includes('app.github.dev');
+
   let baseUrl;
   if (isLocal) {
     baseUrl = `http://localhost:8080`;
   } else if (isCloudWorkstation) {
+    baseUrl = `https://${window.location.host}`;
+  } else if (isCodespaces) {
     baseUrl = `https://${window.location.host}`;
   } else if (typeof window !== 'undefined') {
     // In production, use the actual window location
@@ -23,7 +28,7 @@ export async function signInWithGoogle() {
   }
 
   const redirectTo = `${baseUrl}/auth/callback`;
-  console.log('Auth redirectTo:', redirectTo, { isLocal, isCloudWorkstation, baseUrl });
+  console.log('Auth redirectTo:', redirectTo, { isLocal, isCloudWorkstation, isCodespaces, baseUrl });
   
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',

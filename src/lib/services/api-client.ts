@@ -4,7 +4,16 @@ class ApiClient {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+    // Detect the current environment and set the correct base URL
+    if (typeof window !== 'undefined') {
+      // Client-side: use the current window location
+      this.baseUrl = `${window.location.protocol}//${window.location.host}`;
+    } else {
+      // Server-side: fall back to environment variable or localhost
+      this.baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:8080';
+    }
+
+    console.log('ApiClient initialized with baseUrl:', this.baseUrl);
   }
 
   private async getAuthHeaders() {
