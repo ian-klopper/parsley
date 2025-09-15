@@ -29,7 +29,9 @@ export async function signInWithGoogle() {
 
   const redirectTo = `${baseUrl}/auth/callback`;
   console.log('Auth redirectTo:', redirectTo, { isLocal, isCloudWorkstation, isCodespaces, baseUrl });
-  
+
+  console.log('Starting OAuth with Supabase...');
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
@@ -40,12 +42,15 @@ export async function signInWithGoogle() {
       }
     }
   })
-  
+
+  console.log('OAuth response:', { data, error });
+
   if (error) {
-    console.error('Error signing in with Google:', error.message)
+    console.error('Error signing in with Google:', error.message, error);
     return { success: false, error: error.message }
   }
-  
+
+  console.log('OAuth initiated successfully, redirecting to:', data.url);
   return { success: true, data }
 }
 

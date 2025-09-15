@@ -55,6 +55,7 @@ export function createClient() {
 }
 
 // Create a singleton instance for backward compatibility
+console.log('Creating Supabase browser client with URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
 export const supabase = createClient()
 
 // Test function to verify connection
