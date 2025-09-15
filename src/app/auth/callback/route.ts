@@ -15,7 +15,12 @@ export async function GET(request: Request) {
     NODE_ENV: process.env.NODE_ENV
   })
 
-  console.log('OAuth callback received:', { code: !!code, origin, url: requestUrl.toString() })
+  console.log('OAuth callback received:', {
+    code: !!code,
+    origin,
+    url: requestUrl.toString(),
+    searchParams: Object.fromEntries(requestUrl.searchParams.entries())
+  })
 
   if (code) {
     const cookieStore = cookies()
