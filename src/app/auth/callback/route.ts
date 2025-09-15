@@ -51,8 +51,15 @@ export async function GET(request: Request) {
 
       if (profileError) {
         console.error('Failed to get user profile:', profileError)
-        // User exists but no profile - might be first login, redirect to dashboard
-        console.log('No profile found, redirecting to dashboard for profile creation')
+
+        // If it's a "not found" error, this might be first-time login
+        if (profileError.code === 'PGRST116' || profileError.message.includes('No rows returned')) {
+          console.log('No profile found (first-time login), redirecting to dashboard')
+          return NextResponse.redirect(`${origin}/dashboard`)
+        }
+
+        // For other database errors, still try dashboard but log the issue
+        console.error('Database error during profile lookup, redirecting to dashboard anyway')
         return NextResponse.redirect(`${origin}/dashboard`)
       }
 
