@@ -1,0 +1,38 @@
+{
+  "headers": [
+    {
+      "source": "/auth/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "origin-when-cross-origin"
+        }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        }
+      ]
+    }
+  ],
+  "functions": {
+    "src/app/auth/callback/route.ts": {
+      "maxDuration": 10
+    },
+    "src/app/api/**/route.ts": {
+      "maxDuration": 10
+    }
+  }
+}

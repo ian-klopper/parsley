@@ -6,6 +6,9 @@ export async function middleware(request: NextRequest) {
     request,
   })
 
+  const isProduction = process.env.NODE_ENV === 'production'
+  const isSecureContext = request.url.startsWith('https://') || request.headers.get('x-forwarded-proto') === 'https'
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -19,9 +22,16 @@ export async function middleware(request: NextRequest) {
           supabaseResponse = NextResponse.next({
             request,
           })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
+          cookiesToSet.forEach(({ name, value, options }) => {
+            // Ensure cookies have proper settings for production
+            const cookieOptions = {
+              ...options,
+              sameSite: options?.sameSite || 'lax',
+              secure: isProduction || isSecureContext || options?.secure,
+              path: options?.path || '/',
+            }
+            supabaseResponse.cookies.set(name, value, cookieOptions)
+          })
         },
       },
     }

@@ -3,6 +3,10 @@ import { Database } from '@/types/database'
 
 // Client-side Supabase client with proper cookie handling
 export function createClient() {
+  // Detect if we're in a secure context (HTTPS)
+  const isSecure = typeof window !== 'undefined' &&
+    (window.location.protocol === 'https:' || window.location.hostname === 'localhost')
+
   return createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -18,19 +22,25 @@ export function createClient() {
           if (typeof document === 'undefined') return
           let cookieString = `${name}=${encodeURIComponent(value)}`
 
+          // Always set path to root for OAuth cookies
+          const path = options?.path || '/'
+          cookieString += `; Path=${path}`
+
           if (options?.maxAge) {
             cookieString += `; Max-Age=${options.maxAge}`
           }
-          if (options?.path) {
-            cookieString += `; Path=${options.path}`
-          }
+
           if (options?.domain) {
             cookieString += `; Domain=${options.domain}`
           }
-          if (options?.sameSite) {
-            cookieString += `; SameSite=${options.sameSite}`
-          }
-          if (options?.secure) {
+
+          // Set SameSite=Lax for OAuth compatibility (allows cookies on redirects)
+          // Use None for cross-origin requests if needed
+          const sameSite = options?.sameSite || 'Lax'
+          cookieString += `; SameSite=${sameSite}`
+
+          // Always set Secure flag in production (HTTPS)
+          if (isSecure || options?.secure) {
             cookieString += `; Secure`
           }
 
@@ -40,9 +50,10 @@ export function createClient() {
           if (typeof document === 'undefined') return
           let cookieString = `${name}=; Max-Age=0`
 
-          if (options?.path) {
-            cookieString += `; Path=${options.path}`
-          }
+          // Always use root path for removal
+          const path = options?.path || '/'
+          cookieString += `; Path=${path}`
+
           if (options?.domain) {
             cookieString += `; Domain=${options.domain}`
           }
