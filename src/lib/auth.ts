@@ -12,6 +12,10 @@ export async function signInWithGoogle() {
   const isCodespaces = typeof window !== 'undefined' &&
     window.location.hostname.includes('app.github.dev');
 
+  const isVercel = typeof window !== 'undefined' &&
+    (window.location.hostname.includes('vercel.app') ||
+     window.location.hostname === 'parsley-three.vercel.app');
+
   let baseUrl;
   if (isLocal) {
     baseUrl = `http://localhost:8080`;
@@ -19,6 +23,9 @@ export async function signInWithGoogle() {
     baseUrl = `https://${window.location.host}`;
   } else if (isCodespaces) {
     baseUrl = `https://${window.location.host}`;
+  } else if (isVercel) {
+    // For Vercel, always use the custom domain to avoid cookie issues
+    baseUrl = 'https://parsley-three.vercel.app';
   } else if (typeof window !== 'undefined') {
     // In production, use the actual window location
     baseUrl = `${window.location.protocol}//${window.location.host}`;
@@ -35,6 +42,7 @@ export async function signInWithGoogle() {
     isLocal,
     isCloudWorkstation,
     isCodespaces,
+    isVercel,
     hostname: typeof window !== 'undefined' ? window.location.hostname : 'SSR',
     protocol: typeof window !== 'undefined' ? window.location.protocol : 'SSR',
     baseUrl,
