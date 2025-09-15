@@ -51,22 +51,63 @@ export async function GET(request: Request) {
 
   if (code) {
     const cookieStore = cookies()
+
+    // Check if we've already processed this code (React StrictMode/double render protection)
+    const processedCodes = cookieStore.get('processed_oauth_codes')
+    if (processedCodes?.value?.includes(code.substring(0, 10))) {
+      console.log('OAuth code already processed, redirecting to dashboard')
+      return NextResponse.redirect(`${origin}/dashboard`)
+    }
+
     const supabase = createClient(cookieStore)
 
-    // Log before exchange
-    console.log('Attempting to exchange code for session...')
+    // Log before exchange with more details
+    console.log('Attempting to exchange code for session...', {
+      codeLength: code.length,
+      codePrefix: code.substring(0, 10),
+      timestamp: new Date().toISOString(),
+      cookies: cookieStore.getAll().map(c => ({ name: c.name, hasValue: !!c.value }))
+    })
 
-    // Exchange the code for a session
-    const { data: sessionData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+    // Exchange the code for a session with retry
+    let exchangeError = null
+    let sessionData = null
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const result = await supabase.auth.exchangeCodeForSession(code)
+      sessionData = result.data
+      exchangeError = result.error
+
+      if (!exchangeError) {
+        console.log(`Session exchange successful on attempt ${attempt}`)
+        break
+      }
+
+      if (attempt === 1) {
+        console.log('First exchange attempt failed, retrying...', exchangeError.message)
+        await new Promise(resolve => setTimeout(resolve, 500)) // Wait 500ms before retry
+      }
+    }
 
     if (exchangeError) {
-      console.error('Failed to exchange code for session:', {
+      console.error('Failed to exchange code for session after retries:', {
         error: exchangeError,
         message: exchangeError.message,
         status: exchangeError.status,
-        name: exchangeError.name
+        name: exchangeError.name,
+        hint: exchangeError.hint || 'none',
+        code: exchangeError.code || 'none'
       })
-      return NextResponse.redirect(`${origin}/?auth_error=exchange_failed`)
+
+      // More specific error messages
+      let errorParam = 'exchange_failed'
+      if (exchangeError.message?.includes('invalid_grant')) {
+        errorParam = 'invalid_grant'
+      } else if (exchangeError.message?.includes('redirect_uri_mismatch')) {
+        errorParam = 'redirect_mismatch'
+      }
+
+      return NextResponse.redirect(`${origin}/?auth_error=${errorParam}&details=${encodeURIComponent(exchangeError.message)}`)
     }
 
     console.log('Successfully exchanged code for session:', {
