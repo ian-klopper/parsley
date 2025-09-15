@@ -1,0 +1,14 @@
+{
+  "timestamp": "2025-09-14T05:29:39.390Z",
+  "environment": "test",
+  "results": {
+    "unit": false,
+    "integration": false,
+    "component": false
+  },
+  "summary": {
+    "total": 3,
+    "passed": 0,
+    "failed": 3
+  }
+}

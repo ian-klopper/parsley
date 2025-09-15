@@ -11,11 +11,13 @@
 https://parsley-three.vercel.app
 ```
 
-### Authorized Redirect URIs:
+### Authorized Redirect URIs (BOTH are required):
 ```
 https://parsley-three.vercel.app/auth/callback
 https://drwytmbsonrfbzxpjkzm.supabase.co/auth/v1/callback
 ```
+
+**IMPORTANT**: You must add BOTH redirect URIs above. The first one is for your app's callback, and the second one is for Supabase's internal OAuth handling.
 
 ## Supabase Auth Configuration
 
