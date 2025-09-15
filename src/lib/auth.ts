@@ -2,22 +2,26 @@ import { supabase } from './supabase'
 
 export async function signInWithGoogle() {
   const isLocal = typeof window !== 'undefined' && (
-    window.location.hostname === 'localhost' || 
+    window.location.hostname === 'localhost' ||
     window.location.hostname === '127.0.0.1'
   );
-  
-  const isCloudWorkstation = typeof window !== 'undefined' && 
+
+  const isCloudWorkstation = typeof window !== 'undefined' &&
     window.location.hostname.includes('cloudworkstations.dev');
-  
+
   let baseUrl;
   if (isLocal) {
     baseUrl = `http://localhost:8080`;
   } else if (isCloudWorkstation) {
     baseUrl = `https://${window.location.host}`;
+  } else if (typeof window !== 'undefined') {
+    // In production, use the actual window location
+    baseUrl = `${window.location.protocol}//${window.location.host}`;
   } else {
-    baseUrl = process.env.NEXT_PUBLIC_SITE_URL;
+    // Fallback to environment variable
+    baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://parsley-three.vercel.app';
   }
-    
+
   const redirectTo = `${baseUrl}/auth/callback`;
   console.log('Auth redirectTo:', redirectTo, { isLocal, isCloudWorkstation, baseUrl });
   
