@@ -3,9 +3,19 @@ import { type cookies } from 'next/headers'
 import { Database } from '@/types/database'
 
 export function createClient(cookieStore: ReturnType<typeof cookies>) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!url || !anonKey) {
+    console.error('Missing Supabase environment variables:', { url: !!url, anonKey: !!anonKey })
+    throw new Error('Missing required Supabase environment variables')
+  }
+
+  console.log('Creating Supabase server client with URL:', url.substring(0, 30) + '...')
+
   return createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    url,
+    anonKey,
     {
       cookies: {
         get(name: string) {
