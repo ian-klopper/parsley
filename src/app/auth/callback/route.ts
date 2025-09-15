@@ -7,6 +7,8 @@ export async function GET(request: Request) {
   const code = requestUrl.searchParams.get('code')
   const origin = requestUrl.origin
 
+  console.log('OAuth callback received:', { code: !!code, origin, url: requestUrl.toString() })
+
   if (code) {
     const cookieStore = cookies()
     const supabase = createClient(cookieStore)
@@ -14,28 +16,56 @@ export async function GET(request: Request) {
     // Exchange the code for a session
     const { error } = await supabase.auth.exchangeCodeForSession(code)
 
-    if (!error) {
-      // Get the user to check their role
-      const { data: { user } } = await supabase.auth.getUser()
-
-      if (user) {
-        // Check if user profile exists
-        const { data: profile } = await supabase
-          .from('users')
-          .select('role')
-          .eq('id', user.id)
-          .single()
-
-        // Redirect based on role
-        if (profile?.role === 'pending') {
-          return NextResponse.redirect(`${origin}/pending`)
-        } else {
-          return NextResponse.redirect(`${origin}/dashboard`)
-        }
-      }
+    if (error) {
+      console.error('Failed to exchange code for session:', error)
+      return NextResponse.redirect(`${origin}/`)
     }
+
+    console.log('Successfully exchanged code for session')
+
+    // Get the user to check their role
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+
+    if (userError) {
+      console.error('Failed to get user:', userError)
+      return NextResponse.redirect(`${origin}/`)
+    }
+
+    if (user) {
+      console.log('User found:', { id: user.id, email: user.email })
+
+      // Check if user profile exists
+      const { data: profile, error: profileError } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      if (profileError) {
+        console.error('Failed to get user profile:', profileError)
+        // User exists but no profile - might be first login, redirect to dashboard
+        console.log('No profile found, redirecting to dashboard for profile creation')
+        return NextResponse.redirect(`${origin}/dashboard`)
+      }
+
+      console.log('User profile found:', { role: profile.role })
+
+      // Redirect based on role
+      if (profile?.role === 'pending') {
+        console.log('Redirecting to pending page')
+        return NextResponse.redirect(`${origin}/pending`)
+      } else {
+        console.log('Redirecting to dashboard')
+        return NextResponse.redirect(`${origin}/dashboard`)
+      }
+    } else {
+      console.error('No user found after successful session exchange')
+    }
+  } else {
+    console.error('No authorization code received in callback')
   }
 
   // Return to login page on error
+  console.log('Redirecting to login page due to error')
   return NextResponse.redirect(`${origin}/`)
 }
