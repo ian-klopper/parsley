@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
 import { cookies } from 'next/headers'
 
-export async function GET() {
+export async function GET(request: Request) {
+  // Test redirect functionality
+  const url = new URL(request.url)
+  if (url.searchParams.get('redirect') === 'test') {
+    console.log('Testing redirect from test-env endpoint')
+    return NextResponse.redirect(`${url.origin}/dashboard`)
+  }
   try {
     // Check environment variables
     const envCheck = {
