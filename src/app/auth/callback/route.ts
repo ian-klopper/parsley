@@ -5,36 +5,76 @@ import { cookies } from 'next/headers'
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
+  const error = requestUrl.searchParams.get('error')
+  const errorDescription = requestUrl.searchParams.get('error_description')
   const origin = requestUrl.origin
 
-  // Log environment variables status
-  console.log('Environment variables check:', {
-    NEXT_PUBLIC_SUPABASE_URL: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-    NODE_ENV: process.env.NODE_ENV
-  })
+  // Enhanced logging for debugging
+  const debugData = {
+    timestamp: new Date().toISOString(),
+    environment: {
+      NODE_ENV: process.env.NODE_ENV,
+      VERCEL: process.env.VERCEL,
+      VERCEL_ENV: process.env.VERCEL_ENV,
+      NEXT_PUBLIC_SUPABASE_URL: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    },
+    request: {
+      method: request.method,
+      url: requestUrl.toString(),
+      origin,
+      headers: {
+        host: request.headers.get('host'),
+        'x-forwarded-proto': request.headers.get('x-forwarded-proto'),
+        'x-forwarded-host': request.headers.get('x-forwarded-host'),
+      }
+    },
+    oauth: {
+      hasCode: !!code,
+      codeLength: code?.length || 0,
+      hasError: !!error,
+      error,
+      errorDescription,
+      allParams: Object.fromEntries(requestUrl.searchParams.entries())
+    }
+  }
 
-  console.log('OAuth callback received:', {
-    code: !!code,
-    origin,
-    url: requestUrl.toString(),
-    searchParams: Object.fromEntries(requestUrl.searchParams.entries())
-  })
+  console.log('=== OAuth Callback Debug ===')
+  console.log(JSON.stringify(debugData, null, 2))
+
+  // Check for OAuth errors first
+  if (error) {
+    console.error('OAuth Error:', error, errorDescription)
+    return NextResponse.redirect(`${origin}/?error=${encodeURIComponent(error)}`)
+  }
 
   if (code) {
     const cookieStore = cookies()
     const supabase = createClient(cookieStore)
 
-    // Exchange the code for a session
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    // Log before exchange
+    console.log('Attempting to exchange code for session...')
 
-    if (error) {
-      console.error('Failed to exchange code for session:', error)
-      return NextResponse.redirect(`${origin}/`)
+    // Exchange the code for a session
+    const { data: sessionData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+
+    if (exchangeError) {
+      console.error('Failed to exchange code for session:', {
+        error: exchangeError,
+        message: exchangeError.message,
+        status: exchangeError.status,
+        name: exchangeError.name
+      })
+      return NextResponse.redirect(`${origin}/?auth_error=exchange_failed`)
     }
 
-    console.log('Successfully exchanged code for session')
+    console.log('Successfully exchanged code for session:', {
+      hasSession: !!sessionData?.session,
+      hasUser: !!sessionData?.user,
+      userId: sessionData?.user?.id,
+      userEmail: sessionData?.user?.email
+    })
 
     // Get the user to check their role
     const { data: { user }, error: userError } = await supabase.auth.getUser()

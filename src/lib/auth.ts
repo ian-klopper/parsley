@@ -28,7 +28,18 @@ export async function signInWithGoogle() {
   }
 
   const redirectTo = `${baseUrl}/auth/callback`;
-  console.log('Auth redirectTo:', redirectTo, { isLocal, isCloudWorkstation, isCodespaces, baseUrl });
+
+  // Enhanced logging
+  console.log('=== OAuth Sign In Debug ===');
+  console.log('Environment:', {
+    isLocal,
+    isCloudWorkstation,
+    isCodespaces,
+    hostname: typeof window !== 'undefined' ? window.location.hostname : 'SSR',
+    protocol: typeof window !== 'undefined' ? window.location.protocol : 'SSR',
+    baseUrl,
+    redirectTo
+  });
 
   console.log('Starting OAuth with Supabase...');
 
@@ -43,14 +54,32 @@ export async function signInWithGoogle() {
     }
   })
 
-  console.log('OAuth response:', { data, error });
+  console.log('OAuth response:', {
+    hasData: !!data,
+    hasError: !!error,
+    dataUrl: data?.url,
+    error: error?.message
+  });
 
   if (error) {
     console.error('Error signing in with Google:', error.message, error);
     return { success: false, error: error.message }
   }
 
-  console.log('OAuth initiated successfully, redirecting to:', data.url);
+  if (data?.url) {
+    console.log('OAuth URL generated:', data.url);
+
+    // Parse the OAuth URL to check redirect_to parameter
+    try {
+      const oauthUrl = new URL(data.url);
+      const redirectParam = oauthUrl.searchParams.get('redirect_to');
+      console.log('OAuth URL redirect_to param:', redirectParam);
+    } catch (e) {
+      console.error('Failed to parse OAuth URL:', e);
+    }
+  }
+
+  console.log('OAuth initiated successfully, redirecting to:', data?.url);
   return { success: true, data }
 }
 
