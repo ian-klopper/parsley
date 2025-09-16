@@ -38,3 +38,4 @@ Implementing a new feature:
 DO: Define the steps as a "Flow" within the src/ai/ directory and then build the UI components to trigger and respond to that flow.
 DON'T: Place complex business logic directly inside UI components.
 - maintain the two panel layout on all pages except the login page. All pages should have a canonical back arrow. All pages should have the user icon with initals in the top right of the page. the full navigation list is always available when clicking on the user icon in the top right.
+- we neeed to use port 8080 otherwise google auth with break

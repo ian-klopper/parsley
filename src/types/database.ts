@@ -95,6 +95,41 @@ export interface Database {
           added_by?: string | null;
         };
       };
+      job_documents: {
+        Row: {
+          id: string;
+          job_id: string;
+          file_name: string;
+          storage_path: string;
+          file_url: string;
+          file_type: string;
+          file_size: number;
+          uploaded_by: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          job_id: string;
+          file_name: string;
+          storage_path: string;
+          file_url: string;
+          file_type: string;
+          file_size: number;
+          uploaded_by: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          job_id?: string;
+          file_name?: string;
+          storage_path?: string;
+          file_url?: string;
+          file_type?: string;
+          file_size?: number;
+          uploaded_by?: string;
+          created_at?: string;
+        };
+      };
       activity_logs: {
         Row: {
           id: string;
@@ -135,6 +170,10 @@ export type JobUpdate = Database['public']['Tables']['jobs']['Update'];
 
 export type JobCollaborator = Database['public']['Tables']['job_collaborators']['Row'];
 export type JobCollaboratorInsert = Database['public']['Tables']['job_collaborators']['Insert'];
+
+export type JobDocument = Database['public']['Tables']['job_documents']['Row'];
+export type JobDocumentInsert = Database['public']['Tables']['job_documents']['Insert'];
+export type JobDocumentUpdate = Database['public']['Tables']['job_documents']['Update'];
 
 export type ActivityLog = Database['public']['Tables']['activity_logs']['Row'];
 export type ActivityLogInsert = Database['public']['Tables']['activity_logs']['Insert'];

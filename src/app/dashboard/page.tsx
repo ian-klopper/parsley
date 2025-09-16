@@ -40,6 +40,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { useRouter } from "next/navigation"
 import { LoadingWithTips } from "@/components/LoadingWithTips"
 import { dashboardTips } from "@/lib/loading-tips"
+import { UserService } from "@/lib/user-service"
 import Link from "next/link"
 
 // React Query hooks - instant updates!
@@ -221,10 +222,8 @@ export default function Dashboard() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Venue</TableHead>
-                    <TableHead>Job ID</TableHead>
+                    <TableHead>Venue / Job ID</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Creator</TableHead>
                     <TableHead>Collaborators</TableHead>
                     <TableHead>Last Activity</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
@@ -233,7 +232,7 @@ export default function Dashboard() {
                 <TableBody>
                   {jobs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8">
+                      <TableCell colSpan={5} className="text-center py-8">
                         <div className="flex flex-col items-center gap-2">
                           <FileText className="w-8 h-8 text-muted-foreground" />
                           <p className="text-muted-foreground">No jobs found</p>
@@ -252,33 +251,15 @@ export default function Dashboard() {
                       const creator = getJobCreatorInfo(job);
 
                       return (
-                        <TableRow key={job.id} className="cursor-pointer hover:bg-muted/50">
+                        <TableRow key={job.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/job?id=${job.id}`)}>
                           <TableCell>
-                            <Link
-                              href={`/job?id=${job.id}`}
-                              className="font-medium hover:underline"
-                            >
                               {job.venue}
-                            </Link>
+                            <div className="text-xs text-muted-foreground">{job.job_id}</div>
                           </TableCell>
-                          <TableCell>{job.job_id}</TableCell>
                           <TableCell>
                             <Badge variant={getStatusVariant(job.status)}>
                               {job.status}
                             </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Avatar className="w-6 h-6">
-                                <AvatarFallback
-                                  className="text-xs"
-                                  style={getUserColor(creator, theme, mounted)}
-                                >
-                                  {creator.initials}
-                                </AvatarFallback>
-                              </Avatar>
-                              <span className="text-sm">{creator.email || 'Unknown'}</span>
-                            </div>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-1">
@@ -312,43 +293,18 @@ export default function Dashboard() {
                             {new Date(job.last_activity).toLocaleDateString()}
                           </TableCell>
                           <TableCell>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  onClick={() => router.push(`/job?id=${job.id}`)}
-                                >
-                                  View Details
-                                </DropdownMenuItem>
-                                {(userProfile?.id === job.owner_id || userProfile?.role === 'admin') && (
-                                  <>
-                                    <DropdownMenuItem
-                                      onClick={() => {
-                                        setSelectedJobForTransfer(job);
-                                        setTransferOwnershipDialog(true);
-                                      }}
-                                    >
-                                      Transfer Ownership
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      className="text-destructive"
-                                      onClick={() => {
-                                        setSelectedJobForDelete(job);
-                                        setDeleteJobDialog(true);
-                                      }}
-                                      disabled={deleteJobMutation.isPending}
-                                    >
-                                      <Trash2 className="w-4 h-4 mr-2" />
-                                      {deleteJobMutation.isPending ? 'Deleting...' : 'Delete Job'}
-                                    </DropdownMenuItem>
-                                  </>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                            <Button
+                              variant="ghost"
+                              className="h-8 w-8 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedJobForDelete(job);
+                                setDeleteJobDialog(true);
+                              }}
+                              disabled={deleteJobMutation.isPending}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
@@ -419,7 +375,7 @@ export default function Dashboard() {
 
       {/* Create Job Dialog */}
       <Dialog open={createJobDialog} onOpenChange={setCreateJobDialog}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-lg dark:bg-neutral-900">
           <DialogHeader>
             <DialogTitle>Create New Job</DialogTitle>
           </DialogHeader>
@@ -447,7 +403,7 @@ export default function Dashboard() {
 
             <div>
               <Label>Upload Menu File (Optional)</Label>
-              <div className="mt-2 border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
+              <div className="mt-2 border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors dark:bg-black">
                 <input
                   type="file"
                   id="file-upload"
@@ -485,10 +441,11 @@ export default function Dashboard() {
             <div>
               <Label>Team Members</Label>
               <p className="text-xs text-muted-foreground mb-2">Select collaborators and choose an owner (crown icon)</p>
-              <div className="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-2">
+              <div className="space-y-2 max-h-64 overflow-y-auto p-2 dark:bg-black rounded-lg">
                 {activeUsers.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">No team members available</p>
                 ) : activeUsers.map((user) => {
+                  console.log(user);
                   const isCollaborator = selectedCollaborators.includes(user.id);
                   const isOwner = selectedOwner === user.id;
                   return (
@@ -496,38 +453,32 @@ export default function Dashboard() {
                       key={user.id}
                       className="flex items-center gap-2 p-2 rounded hover:bg-muted/50"
                     >
-                      <Button
-                        type="button"
-                        variant={isCollaborator ? "default" : "outline"}
-                        size="sm"
-                        className="w-8 h-8 p-0"
-                        onClick={() => handleCollaboratorClick(user)}
-                      >
-                        {isCollaborator && <Check className="h-4 w-4" />}
-                      </Button>
                       <Avatar className="w-8 h-8">
                         <AvatarFallback
                           style={getUserColor(user, theme, mounted)}
                         >
-                          {user.initials}
+                          {user.initials || UserService.generateInitials(user.full_name) || 'U'}
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{user.full_name || user.email}</p>
                         <p className="text-xs text-muted-foreground truncate">{user.email}</p>
                       </div>
+                      <Switch
+                        checked={isCollaborator}
+                        onCheckedChange={() => handleCollaboratorClick(user)}
+                      />
                       <Button
                         type="button"
-                        variant={isOwner ? "default" : "outline"}
+                        variant="ghost"
                         size="sm"
                         className={`w-8 h-8 p-0 ${
-                          isOwner ? 'bg-yellow-500 hover:bg-yellow-600 border-yellow-500' : ''
+                          isOwner ? 'text-yellow-500 hover:text-yellow-500' : 'text-gray-400 hover:text-gray-600'
                         }`}
                         onClick={() => handleOwnerClick(user)}
-                        disabled={!isCollaborator && !isOwner}
                         title={!isCollaborator && !isOwner ? "Must be a collaborator to be owner" : "Set as owner"}
                       >
-                        <Crown className={`h-4 w-4 ${isOwner ? 'text-white' : 'text-yellow-500'}`} />
+                        <Crown className={`h-4 w-4`} />
                       </Button>
                     </div>
                   );
@@ -556,7 +507,7 @@ export default function Dashboard() {
 
       {/* Transfer Ownership Dialog */}
       <Dialog open={transferOwnershipDialog} onOpenChange={setTransferOwnershipDialog}>
-        <DialogContent>
+        <DialogContent className="dark:bg-neutral-900">
           <DialogHeader>
             <DialogTitle>Transfer Ownership</DialogTitle>
           </DialogHeader>
@@ -595,7 +546,7 @@ export default function Dashboard() {
 
       {/* Delete Job Dialog */}
       <Dialog open={deleteJobDialog} onOpenChange={setDeleteJobDialog}>
-        <DialogContent>
+        <DialogContent className="dark:bg-neutral-900">
           <DialogHeader>
             <DialogTitle>Delete Job</DialogTitle>
           </DialogHeader>

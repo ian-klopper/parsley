@@ -29,7 +29,7 @@ export const SearchablePopover = React.memo(({
             <PopoverTrigger asChild>
                 {trigger}
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0">
+            <PopoverContent className="w-auto p-0 dark:bg-neutral-800 border-none">
                 <div className="flex flex-col">
                     <div className="p-2 relative">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

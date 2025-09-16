@@ -40,16 +40,9 @@ export function UserNavigation() {
           </Avatar>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <div className="flex items-center justify-start gap-2 p-2">
-            <Avatar className="h-8 w-8">
-              <AvatarFallback style={getUserColor(userProfile, theme, mounted)} suppressHydrationWarning>
-                {userProfile?.initials || UserService.generateInitials(userProfile?.full_name) || 'U'}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex flex-col space-y-1">
-              <p className="text-sm font-medium leading-none">{userProfile?.full_name || 'User'}</p>
-              <p className="text-xs leading-none text-muted-foreground">{userProfile?.email}</p>
-            </div>
+          <div className="flex flex-col space-y-1 p-2">
+            <p className="text-sm font-medium leading-none">{userProfile?.full_name || 'User'}</p>
+            <p className="text-xs leading-none text-muted-foreground">{userProfile?.email}</p>
           </div>
 
           <DropdownMenuSeparator />

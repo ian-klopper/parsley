@@ -34,21 +34,21 @@ export function ColorPicker({ onColorSelect, currentColorIndex, trigger }: Color
       <PopoverTrigger asChild>
         {trigger}
       </PopoverTrigger>
-      <PopoverContent className="w-96 p-4 color-picker-popover">
+      <PopoverContent className="w-80 p-4 color-picker-popover">
         <div className="space-y-4">
           <h4 className="font-medium text-sm">Choose a color</h4>
-          <div className="grid grid-cols-8 gap-3">
+          <div className="grid grid-cols-6 gap-3">
             {colorSpectrum.map((_, index) => {
               const isSelected = currentColorIndex === index
               const colorValue = getColorValue(index)
-              
+
               return (
                 <button
                   key={index}
                   className={`
-                    w-8 h-8 rounded-md border-2 transition-all
-                    ${isSelected 
-                      ? 'border-primary ring-2 ring-primary ring-offset-2 scale-110' 
+                    w-10 h-10 rounded-md border-2 transition-all
+                    ${isSelected
+                      ? 'border-primary ring-2 ring-primary ring-offset-2 scale-110'
                       : 'border-border hover:border-primary hover:scale-105'
                     }
                   `}

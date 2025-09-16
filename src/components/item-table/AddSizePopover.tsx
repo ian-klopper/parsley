@@ -33,7 +33,7 @@ export const AddSizePopover = React.memo(({
             <PopoverTrigger asChild>
                 {trigger}
             </PopoverTrigger>
-            <PopoverContent>
+            <PopoverContent className="dark:bg-neutral-800 border-none">
                 <div className="grid gap-4">
                     <p className="font-medium">Add Size</p>
                     <div className="grid gap-2">

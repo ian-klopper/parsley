@@ -4,8 +4,7 @@ import {
   Avatar,
   AvatarFallback,
 } from "@/components/ui/avatar"
-import { AlertCircle, CheckCircle2 } from "lucide-react"
-import { getHashColor, getUserColor } from "@/lib/theme-utils"
+import { getUserColor } from "@/lib/theme-utils"
 import {
   Table,
   TableBody,
@@ -21,7 +20,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
 import { useTheme } from "next-themes"
 import { useState, useEffect, useCallback } from "react"
 import { ColorPicker } from "@/components/ui/color-picker"
@@ -33,7 +31,6 @@ import { useAuth } from "@/contexts/AuthContext"
 import { UserService } from "@/lib/user-service"
 import { User } from "@/types/database"
 import { useToast } from "@/hooks/use-toast"
-import { colorSpectrum } from '@/lib/colors';
 
 
 
@@ -106,39 +103,6 @@ export default function AdminPage() {
     }
   };
 
-  const getLocalUserColor = (user: User) => {
-    if (user.color_index !== null && user.color_index !== undefined) {
-      const colorObj = colorSpectrum[user.color_index];
-      return mounted && theme === 'dark' ? colorObj.dark : colorObj.light;
-    }
-    return getUserColor(user, theme, mounted).backgroundColor;
-  };
-
-  const getRoleStyle = (role: string) => {
-    // Use specific color indices from the 64-color spectrum for roles
-    let colorIndex;
-    switch (role) {
-      case 'admin': colorIndex = 0; break;    // Red spectrum
-      case 'user': colorIndex = 21; break;    // Green spectrum
-      case 'pending': colorIndex = 10; break; // Yellow spectrum
-      default: colorIndex = 32; break;       // Gray/neutral spectrum
-    }
-
-    const colorObj = colorSpectrum[colorIndex];
-    const backgroundColor = mounted && theme === 'dark' ? colorObj.dark : colorObj.light;
-    const color = mounted && theme === 'dark' ? 'white' : 'black';
-
-    return { backgroundColor, color };
-  };
-
-  const getRoleIcon = (role: string) => {
-    switch (role) {
-      case 'admin': return <CheckCircle2 className="h-4 w-4" />;
-      case 'user': return <CheckCircle2 className="h-4 w-4" />;
-      case 'pending': return <AlertCircle className="h-4 w-4" />;
-      default: return <AlertCircle className="h-4 w-4" />;
-    }
-  };
 
 
   return (
@@ -159,7 +123,6 @@ export default function AdminPage() {
                     <TableRow>
                       <TableHead>User</TableHead>
                       <TableHead>Email</TableHead>
-                      <TableHead>Status</TableHead>
                       <TableHead>Role</TableHead>
                       <TableHead>Joined</TableHead>
                     </TableRow>
@@ -182,20 +145,13 @@ export default function AdminPage() {
                             />
                             <div>
                               <div className="font-medium">{user.full_name || 'Unknown User'}</div>
-                              <div className="text-xs text-muted-foreground">{user.initials || UserService.generateInitials(user.full_name)}</div>
                             </div>
                           </div>
                         </TableCell>
                         <TableCell>{user.email}</TableCell>
                         <TableCell>
-                          <Badge variant="secondary" style={getRoleStyle(user.role)} suppressHydrationWarning>
-                            {getRoleIcon(user.role)}
-                            <span className="ml-1 capitalize">{user.role}</span>
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Select 
-                            value={user.role} 
+                          <Select
+                            value={user.role}
                             onValueChange={(value: 'pending' | 'user' | 'admin') => handleRoleChange(user.id, value)}
                             disabled={updating === user.id || user.id === userProfile?.id}
                           >
@@ -216,7 +172,7 @@ export default function AdminPage() {
                     ))}
                     {users.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
                           No users found
                         </TableCell>
                       </TableRow>
