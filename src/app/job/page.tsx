@@ -11,7 +11,7 @@ import {
   AvatarFallback,
 } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Users, Crown, Upload, Play, Trash2 } from "lucide-react"
+import { Users, Crown, Upload, Play, Trash2, FileText, Image, FileSpreadsheet, Table as TableIcon, File, Download, X } from "lucide-react"
 import { UserNavigation } from "@/components/UserNavigation"
 import {
   DropdownMenu,
@@ -38,12 +38,15 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
+import { useTheme } from "next-themes";
 import { LoadingWithTips } from "@/components/LoadingWithTips";
 import { jobTips } from "@/lib/loading-tips";
 
 // React Query hooks - instant updates!
 import { useJob, useUpdateJob, useDeleteJob, useTransferOwnership } from "@/hooks/queries/useJobs"
-import { useUsers } from "@/hooks/queries/useUsers"
+import { useUsers, useActiveUsers } from "@/hooks/queries/useUsers"
+import { useFileUpload } from "@/hooks/useFileUpload"
+import { FilePreviewPanel } from "@/components/file-preview/FilePreviewPanel"
 
 const ItemTable = dynamic(() => import("@/components/ItemTable").then(mod => ({ default: mod.ItemTable })), {
   loading: () => <div className="animate-pulse h-32 bg-muted rounded">Loading table...</div>
@@ -53,9 +56,22 @@ import { allItems, FoodItem } from "@/lib/food-data";
 import { tabCategories } from "@/lib/menu-data";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { UserService } from "@/lib/user-service";
+
+// Helper function to get icon component from string
+function getFileIconComponent(iconName: string) {
+  switch (iconName) {
+    case 'FileText': return FileText;
+    case 'Image': return Image;
+    case 'FileSpreadsheet': return FileSpreadsheet;
+    case 'Table': return TableIcon;
+    default: return File;
+  }
+}
 
 function JobPageContent() {
   const { user, userProfile, isAuthenticated } = useAuth();
+  const { theme } = useTheme();
   const searchParams = useSearchParams();
   const router = useRouter();
   const jobId = searchParams.get('id');
@@ -63,6 +79,23 @@ function JobPageContent() {
   // React Query hooks with caching and optimistic updates
   const { data: job, isLoading: jobLoading, error: jobError } = useJob(jobId || '');
   const { data: users = [], isLoading: usersLoading } = useUsers();
+  const { data: activeUsers = [] } = useActiveUsers();
+
+  // File upload hook
+  const {
+    documents,
+    isLoadingDocuments,
+    uploadFile,
+    deleteDocument,
+    getDownloadUrl,
+    uploadState,
+    isUploading,
+    uploadProgress,
+    uploadError,
+    isDeleting,
+    formatFileSize,
+    getFileIcon
+  } = useFileUpload(jobId || '');
   const updateJobMutation = useUpdateJob();
   const deleteJobMutation = useDeleteJob();
   const transferOwnershipMutation = useTransferOwnership();
@@ -70,6 +103,7 @@ function JobPageContent() {
   const [mounted, setMounted] = useState(false);
   const [collaboratorsDialog, setCollaboratorsDialog] = useState(false);
   const [selectedCollaborators, setSelectedCollaborators] = useState<string[]>([]);
+  const [selectedOwner, setSelectedOwner] = useState<string>('');
   const [items, setItems] = useState<FoodItem[]>(allItems);
   const [extractionStarted, setExtractionStarted] = useState(false);
   const [transferOwnershipDialog, setTransferOwnershipDialog] = useState(false);
@@ -109,10 +143,11 @@ function JobPageContent() {
     setMounted(true);
   }, []);
 
-  // Initialize selected collaborators when job loads
+  // Initialize selected collaborators and owner when job loads
   useEffect(() => {
     if (job && job.collaborator_users) {
       setSelectedCollaborators(job.collaborator_users.map((c: any) => c.id));
+      setSelectedOwner(job.owner_id || '');
     }
   }, [job]);
 
@@ -162,9 +197,16 @@ function JobPageContent() {
     if (!canEdit) return;
 
     // Optimistic update - instant UI feedback!
+    const updateData: any = { collaborators: selectedCollaborators };
+
+    // If owner has changed, also update owner
+    if (selectedOwner && selectedOwner !== job.owner_id) {
+      updateData.owner_id = selectedOwner;
+    }
+
     updateJobMutation.mutate({
       id: job.id,
-      data: { collaborators: selectedCollaborators }
+      data: updateData
     }, {
       onSuccess: () => {
         setCollaboratorsDialog(false);
@@ -204,244 +246,191 @@ function JobPageContent() {
   };
 
 
-  const handleCollaboratorClick = (userId: string) => {
+  const handleCollaboratorClick = (user: any) => {
     if (!canEdit) return;
 
-    const isSelected = selectedCollaborators.includes(userId);
+    const isSelected = selectedCollaborators.includes(user.id);
+    const isOwner = selectedOwner === user.id;
+
     if (isSelected) {
-      setSelectedCollaborators(prev => prev.filter(id => id !== userId));
+      // Cannot remove collaborator status if they are the owner
+      if (isOwner) {
+        return; // Do nothing - owner must remain a collaborator
+      }
+      setSelectedCollaborators(prev => prev.filter(id => id !== user.id));
     } else {
-      setSelectedCollaborators(prev => [...prev, userId]);
+      setSelectedCollaborators(prev => [...prev, user.id]);
+    }
+  };
+
+  const handleOwnerClick = (user: any) => {
+    if (!canEdit) return;
+
+    // If user is not a collaborator, make them one first
+    if (!selectedCollaborators.includes(user.id)) {
+      setSelectedCollaborators(prev => [...prev, user.id]);
+    }
+
+    // Toggle owner selection
+    if (selectedOwner === user.id) {
+      setSelectedOwner('');
+    } else {
+      setSelectedOwner(user.id);
     }
   };
 
   return (
     <div className="h-screen flex flex-col">
-      {/* Header */}
-      <div className="border-b p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <BackButton />
-            <div>
-              <h1 className="text-2xl font-semibold">{job.venue}</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <Badge variant={getStatusVariant(job.status)}>
-                  {job.status}
-                </Badge>
-                <span className="text-sm text-muted-foreground">
-                  Job ID: {job.job_id}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {canEdit && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    Change Status
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem
-                    onClick={() => handleStatusChange('draft')}
-                    disabled={updateJobMutation.isPending}
-                  >
-                    Draft
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => handleStatusChange('live')}
-                    disabled={updateJobMutation.isPending}
-                  >
-                    Live
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => handleStatusChange('processing')}
-                    disabled={updateJobMutation.isPending}
-                  >
-                    Processing
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => handleStatusChange('complete')}
-                    disabled={updateJobMutation.isPending}
-                  >
-                    Complete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Main Content */}
       <div className="flex-1 overflow-hidden">
         <ResizablePanelGroup direction="horizontal" className="h-full">
-          <ResizablePanel defaultSize={75} minSize={50}>
-            <div className="p-4 h-full overflow-auto">
-              <Tabs defaultValue="Food" className="h-full flex flex-col">
-                <TabsList className="grid w-full grid-cols-9 mb-4">
-                  {tabs.map((tab) => (
-                    <TabsTrigger key={tab} value={tab} className="text-xs">
-                      {tab}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
+          <ResizablePanel defaultSize={75} minSize={50} className="h-full">
+            <div className="h-full flex flex-col">
+              {/* Header */}
+              <div className="p-4">
+                <div className="flex items-center gap-4">
+                  <BackButton />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-2xl font-semibold">{job.venue}</h1>
+                      <Badge variant={getStatusVariant(job.status)}>
+                        {job.status}
+                      </Badge>
+                      <span className="text-sm text-muted-foreground">
+                        Job ID: {job.job_id}
+                      </span>
+                    </div>
+                    {/* User fullname badges */}
+                    <div className="flex items-center gap-2 mt-2">
+                      <div className="flex flex-wrap gap-1">
+                        {job.collaborator_users?.map((collaborator: any) => {
+                          const colorStyle = getUserColor(collaborator, theme, mounted);
+                          const isOwner = collaborator.id === job.owner_id;
+                          return (
+                            <Badge
+                              key={collaborator.id}
+                              variant="secondary"
+                              className="text-xs px-2 py-0.5 flex items-center gap-1"
+                              style={{
+                                backgroundColor: colorStyle.backgroundColor,
+                                color: colorStyle.color,
+                                border: 'none'
+                              }}
+                            >
+                              {collaborator.full_name || collaborator.email || 'Unknown'}
+                              {isOwner && <Crown className="w-3 h-3" style={{color: colorStyle.color}} />}
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                      {canEdit && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => setCollaboratorsDialog(true)}
+                        >
+                          <Users className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto p-4">
+                <Tabs defaultValue="Food" className="h-full flex flex-col">
+                  <TabsList className="flex flex-wrap gap-1 mb-4 h-auto bg-transparent p-0 justify-start">
+                    {tabs.map((tab) => (
+                      <TabsTrigger key={tab} value={tab} className="text-xs flex-shrink-0">
+                        {tab}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
 
-                {tabs.map((tab) => (
-                  <TabsContent key={tab} value={tab} className="flex-1 overflow-hidden">
-                    <ItemTable
-                      items={getItemsForTab(tab)}
-                      tab={tab}
-                      onItemsChange={handleItemsChange}
-                      readonly={!canEdit}
-                    />
-                  </TabsContent>
-                ))}
-              </Tabs>
+                  {tabs.map((tab) => (
+                    <TabsContent key={tab} value={tab} className="flex-1 overflow-hidden">
+                      <ItemTable
+                        items={getItemsForTab(tab)}
+                        tab={tab}
+                        onItemsChange={handleItemsChange}
+                        readonly={!canEdit}
+                      />
+                    </TabsContent>
+                  ))}
+                </Tabs>
+              </div>
             </div>
           </ResizablePanel>
 
           <ResizableHandle withHandle={false} />
 
-          <ResizablePanel defaultSize={25} minSize={20}>
-            <div className="p-4 border-l h-full overflow-auto flex flex-col">
-              <div className="flex justify-end mb-4">
+          <ResizablePanel defaultSize={25} minSize={20} className="h-full">
+            <div className="h-full flex flex-col border-l">
+              <div className="flex justify-end p-4">
                 <UserNavigation />
               </div>
-              <div className="space-y-6 flex-1">
-                {/* Job Info */}
-                <div>
-                  <h3 className="text-sm font-medium mb-2">Job Information</h3>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Created:</span>
-                      <span>{new Date(job.created_at).toLocaleDateString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Updated:</span>
-                      <span>{new Date(job.updated_at).toLocaleDateString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Activity:</span>
-                      <span>{new Date(job.last_activity).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Creator */}
-                <div>
-                  <h3 className="text-sm font-medium mb-2">Creator</h3>
-                  <div className="flex items-center gap-2">
-                    <Avatar className="w-8 h-8">
-                      <AvatarFallback
-                        style={{ backgroundColor: getUserColor(job.creator?.color_index || 0) }}
-                      >
-                        {job.creator?.initials || '??'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {job.creator?.full_name || job.creator?.email || 'Unknown'}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {job.creator?.email}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Owner */}
-                <div>
-                  <h3 className="text-sm font-medium mb-2">Owner</h3>
-                  <div className="flex items-center gap-2">
-                    <Avatar className="w-8 h-8">
-                      <AvatarFallback
-                        style={{ backgroundColor: getUserColor(job.owner?.color_index || 0) }}
-                      >
-                        {job.owner?.initials || '??'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {job.owner?.full_name || job.owner?.email || 'Unknown'}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {job.owner?.email}
-                      </p>
-                    </div>
-                    <Crown className="w-4 h-4 text-yellow-500" />
-                  </div>
-                  {canEdit && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full mt-2"
-                      onClick={() => setTransferOwnershipDialog(true)}
-                      disabled={transferOwnershipMutation.isPending}
+              <div className="flex-1 overflow-auto p-4 pt-0">
+                <div className="space-y-4">
+                  {/* Upload Area */}
+                  <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors dark:bg-black ${
+                    isUploading ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
+                  }`}>
+                    <input
+                      type="file"
+                      id="file-upload-job"
+                      className="hidden"
+                      accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.csv"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          uploadFile(file);
+                          // Reset input
+                          e.target.value = '';
+                        }
+                      }}
+                      disabled={isUploading}
+                    />
+                    <label
+                      htmlFor="file-upload-job"
+                      className={`flex flex-col items-center gap-2 ${
+                        isUploading ? 'cursor-not-allowed' : 'cursor-pointer'
+                      }`}
                     >
-                      {transferOwnershipMutation.isPending ? 'Transferring...' : 'Transfer Ownership'}
-                    </Button>
-                  )}
-                </div>
-
-                {/* Team Members */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-medium">Team Members</h3>
-                    {canEdit && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCollaboratorsDialog(true)}
-                        disabled={updateJobMutation.isPending}
-                      >
-                        <Users className="w-4 h-4 mr-1" />
-                        Edit
-                      </Button>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    {job.collaborator_users?.map((collaborator: any) => (
-                      <div key={collaborator.id} className="flex items-center gap-2">
-                        <Avatar className="w-6 h-6">
-                          <AvatarFallback
-                            className="text-xs"
-                            style={{ backgroundColor: getUserColor(collaborator.color_index || 0) }}
-                          >
-                            {collaborator.initials}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium truncate">
-                            {collaborator.full_name || collaborator.email}
-                          </p>
-                        </div>
-                        {collaborator.id === job.owner_id && (
-                          <Crown className="w-3 h-3 text-yellow-500" />
-                        )}
+                      <Upload className={`w-8 h-8 ${
+                        isUploading ? 'text-primary animate-pulse' : 'text-muted-foreground'
+                      }`} />
+                      <div>
+                        <p className="text-sm font-medium">
+                          {isUploading ? 'Uploading...' : 'Click to upload or drag and drop'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">PDF, PNG, JPG, Excel, CSV (max 10MB)</p>
                       </div>
-                    )) || (
-                      <p className="text-xs text-muted-foreground">No collaborators</p>
+                    </label>
+
+                    {/* Upload Progress */}
+                    {isUploading && (
+                      <div className="mt-4">
+                        <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
+                          <div
+                            className="bg-primary h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${uploadProgress}%` }}
+                          ></div>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">{uploadProgress}%</p>
+                      </div>
+                    )}
+
+                    {/* Upload Error */}
+                    {uploadError && (
+                      <div className="mt-4 text-xs text-destructive">
+                        {uploadError}
+                      </div>
                     )}
                   </div>
-                </div>
 
-                {/* Actions */}
-                {canEdit && (
-                  <div className="pt-4 border-t">
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      className="w-full"
-                      onClick={() => setDeleteDialog(true)}
-                      disabled={deleteJobMutation.isPending}
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      {deleteJobMutation.isPending ? 'Deleting...' : 'Delete Job'}
-                    </Button>
-                  </div>
-                )}
+                  {/* File Previews */}
+                  <FilePreviewPanel jobId={jobId} />
+                </div>
               </div>
             </div>
           </ResizablePanel>
@@ -450,38 +439,54 @@ function JobPageContent() {
 
       {/* Collaborators Dialog */}
       <Dialog open={collaboratorsDialog} onOpenChange={setCollaboratorsDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md dark:bg-neutral-900">
           <DialogHeader>
             <DialogTitle>Edit Team Members</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {users.filter(u => u.role !== 'pending').map((user) => (
-                <div
-                  key={user.id}
-                  className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${
-                    selectedCollaborators.includes(user.id)
-                      ? 'bg-primary/10 border border-primary'
-                      : 'hover:bg-muted/50 border border-transparent'
-                  }`}
-                  onClick={() => handleCollaboratorClick(user.id)}
-                >
-                  <Avatar className="w-8 h-8">
-                    <AvatarFallback
-                      style={{ backgroundColor: getUserColor(user.color_index || 0) }}
+            <p className="text-xs text-muted-foreground">Select collaborators and choose an owner (crown icon)</p>
+            <div className="space-y-2 max-h-64 overflow-y-auto p-2 dark:bg-black rounded-lg">
+              {activeUsers.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No team members available</p>
+              ) : activeUsers.map((user) => {
+                const isCollaborator = selectedCollaborators.includes(user.id);
+                const isOwner = selectedOwner === user.id;
+                return (
+                  <div
+                    key={user.id}
+                    className="flex items-center gap-2 p-2 rounded hover:bg-muted/50"
+                  >
+                    <Avatar className="w-8 h-8">
+                      <AvatarFallback
+                        style={getUserColor(user, theme, mounted)}
+                      >
+                        {user.initials || UserService.generateInitials(user.full_name) || 'U'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{user.full_name || user.email}</p>
+                      <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                    </div>
+                    <Switch
+                      checked={isCollaborator}
+                      disabled={isOwner}
+                      onCheckedChange={() => handleCollaboratorClick(user)}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className={`w-8 h-8 p-0 ${
+                        isOwner ? 'text-yellow-500 hover:text-yellow-500' : 'text-gray-400 hover:text-gray-600'
+                      }`}
+                      onClick={() => handleOwnerClick(user)}
+                      title={!isCollaborator && !isOwner ? "Click to make collaborator and set as owner" : "Set as owner"}
                     >
-                      {user.initials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{user.full_name || user.email}</p>
-                    <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                      <Crown className="h-4 w-4" />
+                    </Button>
                   </div>
-                  {user.id === job.owner_id && (
-                    <Crown className="w-4 h-4 text-yellow-500 flex-shrink-0" />
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
             <div className="flex justify-end gap-2">
               <Button
@@ -504,7 +509,7 @@ function JobPageContent() {
 
       {/* Transfer Ownership Dialog */}
       <Dialog open={transferOwnershipDialog} onOpenChange={setTransferOwnershipDialog}>
-        <DialogContent>
+        <DialogContent className="dark:bg-neutral-900">
           <DialogHeader>
             <DialogTitle>Transfer Ownership</DialogTitle>
           </DialogHeader>
@@ -543,7 +548,7 @@ function JobPageContent() {
 
       {/* Delete Job Dialog */}
       <Dialog open={deleteDialog} onOpenChange={setDeleteDialog}>
-        <DialogContent>
+        <DialogContent className="dark:bg-neutral-900">
           <DialogHeader>
             <DialogTitle>Delete Job</DialogTitle>
           </DialogHeader>
