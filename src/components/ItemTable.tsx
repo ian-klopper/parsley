@@ -7,9 +7,12 @@ import {
   CollapsibleContent, 
   CollapsibleTrigger 
 } from "@/components/ui/collapsible";
-import { 
-  Table, 
-  TableBody
+import {
+  Table,
+  TableBody,
+  TableHead,
+  TableHeader,
+  TableRow
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { ChevronsUpDown, PlusCircle } from "lucide-react";
@@ -56,6 +59,23 @@ export const ItemTable = ({ items: initialItems, onItemsChange }: { items: FoodI
             'modifiers-hover': hoveredColumn === 'modifiers'
           }
         )}>
+          {/* Single Table Header */}
+          <div className="sticky top-0 z-20 bg-background">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-b-0">
+                  <TableHead className="w-[16%]">Item(s)</TableHead>
+                  <TableHead className="w-[12%]">Category</TableHead>
+                  <TableHead className="w-[16%]">Menu(s)</TableHead>
+                  <TableHead className="w-[16%]">Size(s)</TableHead>
+                  <TableHead className="w-[16%]">Modifier(s)</TableHead>
+                  <TableHead className="w-[24%]"></TableHead>
+                </TableRow>
+              </TableHeader>
+            </Table>
+          </div>
+
+          {/* Collapsible Menu Sections */}
           {Object.entries(groupedItems).map(([menu, menuItems]) => (
             <Collapsible key={menu} defaultOpen={true}>
               <CollapsibleTrigger className="w-full">
@@ -68,7 +88,6 @@ export const ItemTable = ({ items: initialItems, onItemsChange }: { items: FoodI
                 <Table>
                   <TableBody>
                     {menuItems.map((item, index) => {
-                      
                       return (
                         <ItemTableRow
                           key={item.name}
@@ -88,7 +107,7 @@ export const ItemTable = ({ items: initialItems, onItemsChange }: { items: FoodI
                     })}
                   </TableBody>
                 </Table>
-                <div className="flex justify-end mt-4">
+                <div className="flex justify-end mt-4 mb-4 px-1">
                   <Button onClick={() => handleAddItem(menu)} variant="outline">
                     <PlusCircle className="mr-2 h-4 w-4" />
                     Add Item

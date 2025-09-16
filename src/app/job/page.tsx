@@ -47,6 +47,7 @@ import { useJob, useUpdateJob, useDeleteJob, useTransferOwnership } from "@/hook
 import { useUsers, useActiveUsers } from "@/hooks/queries/useUsers"
 import { useFileUpload } from "@/hooks/useFileUpload"
 import { FilePreviewPanel } from "@/components/file-preview/FilePreviewPanel"
+import { MockExtractionResults } from "@/components/MockExtractionResults"
 
 const ItemTable = dynamic(() => import("@/components/ItemTable").then(mod => ({ default: mod.ItemTable })), {
   loading: () => <div className="animate-pulse h-32 bg-muted rounded">Loading table...</div>
@@ -106,6 +107,8 @@ function JobPageContent() {
   const [selectedOwner, setSelectedOwner] = useState<string>('');
   const [items, setItems] = useState<FoodItem[]>(allItems);
   const [extractionStarted, setExtractionStarted] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [showResults, setShowResults] = useState(false);
   const [transferOwnershipDialog, setTransferOwnershipDialog] = useState(false);
   const [newOwnerEmail, setNewOwnerEmail] = useState('');
   const [deleteDialog, setDeleteDialog] = useState(false);
@@ -245,6 +248,19 @@ function JobPageContent() {
     });
   };
 
+  const handleStartExtraction = async () => {
+    if (!documents || documents.length === 0) return;
+
+    setIsProcessing(true);
+    setExtractionStarted(true);
+
+    // Simulate processing for 3 seconds
+    setTimeout(() => {
+      setIsProcessing(false);
+      setShowResults(true);
+    }, 3000);
+  };
+
 
   const handleCollaboratorClick = (user: any) => {
     if (!canEdit) return;
@@ -337,27 +353,34 @@ function JobPageContent() {
                   </div>
                 </div>
               </div>
-              <div className="flex-1 overflow-auto p-4">
-                <Tabs defaultValue="Food" className="h-full flex flex-col">
-                  <TabsList className="flex flex-wrap gap-1 mb-4 h-auto bg-transparent p-0 justify-start">
-                    {tabs.map((tab) => (
-                      <TabsTrigger key={tab} value={tab} className="text-xs flex-shrink-0">
-                        {tab}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-
-                  {tabs.map((tab) => (
-                    <TabsContent key={tab} value={tab} className="flex-1 overflow-hidden">
-                      <ItemTable
-                        items={getItemsForTab(tab)}
-                        tab={tab}
-                        onItemsChange={handleItemsChange}
-                        readonly={!canEdit}
-                      />
-                    </TabsContent>
-                  ))}
-                </Tabs>
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="sticky top-0 z-10 bg-background">
+                  <Tabs defaultValue="Food" className="p-4 pb-0">
+                    <TabsList className="flex flex-wrap gap-1 h-auto bg-transparent p-0 justify-start">
+                      {tabs.map((tab) => (
+                        <TabsTrigger key={tab} value={tab} className="text-xs flex-shrink-0">
+                          {tab}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                  </Tabs>
+                </div>
+                <div className="flex-1 overflow-auto">
+                  <div className="p-4 pt-0">
+                    <Tabs defaultValue="Food">
+                      {tabs.map((tab) => (
+                        <TabsContent key={tab} value={tab} className="mt-4">
+                          <ItemTable
+                            items={getItemsForTab(tab)}
+                            tab={tab}
+                            onItemsChange={handleItemsChange}
+                            readonly={!canEdit}
+                          />
+                        </TabsContent>
+                      ))}
+                    </Tabs>
+                  </div>
+                </div>
               </div>
             </div>
           </ResizablePanel>
@@ -366,11 +389,12 @@ function JobPageContent() {
 
           <ResizablePanel defaultSize={25} minSize={20} className="h-full">
             <div className="h-full flex flex-col border-l">
-              <div className="flex justify-end p-4">
-                <UserNavigation />
-              </div>
-              <div className="flex-1 overflow-auto p-4 pt-0">
-                <div className="space-y-4">
+              <ScrollArea className="flex-1">
+                <div className="p-4 space-y-4">
+                  {/* User Navigation */}
+                  <div className="flex justify-end">
+                    <UserNavigation />
+                  </div>
                   {/* Upload Area */}
                   <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors dark:bg-black ${
                     isUploading ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
@@ -428,10 +452,35 @@ function JobPageContent() {
                     )}
                   </div>
 
+                  {/* Start Extraction Button */}
+                  <button
+                    onClick={handleStartExtraction}
+                    disabled={!documents || documents.length === 0 || isProcessing}
+                    className={`w-full py-3 px-4 rounded-lg font-medium transition-all ${
+                      !documents || documents.length === 0 || isProcessing
+                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm hover:shadow-md'
+                    }`}
+                  >
+                    {isProcessing ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="w-4 h-4 border-2 border-gray-300 border-t-white rounded-full animate-spin"></div>
+                        Processing...
+                      </div>
+                    ) : (
+                      'Start Extraction'
+                    )}
+                  </button>
+
+                  {/* Extraction Results */}
+                  {showResults && documents && (
+                    <MockExtractionResults documents={documents} />
+                  )}
+
                   {/* File Previews */}
                   <FilePreviewPanel jobId={jobId} />
                 </div>
-              </div>
+              </ScrollArea>
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>

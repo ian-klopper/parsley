@@ -119,13 +119,13 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ jobId }) => 
   }
 
   return (
-    <div className="space-y-8 pb-8">
+    <div className="w-full space-y-8 pb-8">
       {previews.map((preview, index) => {
         const document = documents[index];
         if (!document) return null;
 
         return (
-          <div key={`${document.id}-${preview.id}`} className="relative">
+          <div key={`${document.id}-${preview.id}`} className="relative w-full">
             {renderPreview(preview, document)}
             {index < previews.length - 1 && (
               <div className="mt-8 border-b border-gray-200" />

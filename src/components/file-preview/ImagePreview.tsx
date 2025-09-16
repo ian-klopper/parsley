@@ -43,31 +43,33 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({ preview, document })
   return (
     <>
       {/* Main Image */}
-      <div className="relative group cursor-pointer" onClick={handleImageClick}>
-        <img
-          src={preview.imageUrl}
-          alt={document.file_name}
-          className="w-full h-auto max-w-none"
-          style={{
-            maxHeight: '80vh',
-            objectFit: 'contain'
-          }}
-          onLoad={() => setImageLoaded(true)}
-          onError={() => setImageError(true)}
-        />
+      <div className="w-full flex justify-center">
+        <div className="relative group cursor-pointer w-full" onClick={handleImageClick}>
+          <img
+            src={preview.imageUrl}
+            alt={document.file_name}
+            className="max-w-full h-auto block"
+            style={{
+              width: '100%',
+              objectFit: 'contain'
+            }}
+            onLoad={() => setImageLoaded(true)}
+            onError={() => setImageError(true)}
+          />
 
-        {/* Loading state */}
-        {!imageLoaded && !imageError && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
-            <div className="text-gray-500">Loading image...</div>
-          </div>
-        )}
+          {/* Loading state */}
+          {!imageLoaded && !imageError && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
+              <div className="text-gray-500">Loading image...</div>
+            </div>
+          )}
 
-        {/* Zoom overlay */}
-        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 flex items-center justify-center">
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-black bg-opacity-75 text-white p-2 rounded-lg flex items-center gap-2">
-            <ZoomIn size={16} />
-            <span className="text-sm">Click to zoom</span>
+          {/* Zoom overlay */}
+          <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 flex items-center justify-center">
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-black bg-opacity-75 text-white p-2 rounded-lg flex items-center gap-2">
+              <ZoomIn size={16} />
+              <span className="text-sm">Click to zoom</span>
+            </div>
           </div>
         </div>
       </div>

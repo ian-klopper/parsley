@@ -37,10 +37,10 @@ export const SpreadsheetPreview: React.FC<SpreadsheetPreviewProps> = ({ preview,
   const hasMoreRows = currentSheet.data.length > 10;
 
   return (
-    <div className="w-full">
+    <div className="w-full flex flex-col items-center">
       {/* Sheet selector for multi-sheet files */}
       {sheets.length > 1 && (
-        <div className="mb-4 flex gap-2 flex-wrap">
+        <div className="mb-4 flex gap-2 flex-wrap justify-center">
           {sheets.map((sheet, index) => (
             <button
               key={index}
@@ -58,7 +58,7 @@ export const SpreadsheetPreview: React.FC<SpreadsheetPreviewProps> = ({ preview,
       )}
 
       {/* Table container with horizontal scroll */}
-      <div className="overflow-x-auto border border-gray-200 rounded">
+      <div className="w-full max-w-full overflow-x-auto border border-gray-200 rounded">
         <table className="min-w-full bg-white">
           {/* Headers */}
           {currentSheet.headers.length > 0 && (
@@ -88,7 +88,7 @@ export const SpreadsheetPreview: React.FC<SpreadsheetPreviewProps> = ({ preview,
                     key={cellIndex}
                     className="px-3 py-2 text-sm text-gray-900 border-r border-gray-200 last:border-r-0"
                   >
-                    <div className="max-w-xs truncate" title={String(cell || '')}>
+                    <div className="max-w-[150px] truncate" title={String(cell || '')}>
                       {cell !== null && cell !== undefined ? String(cell) : ''}
                     </div>
                   </td>

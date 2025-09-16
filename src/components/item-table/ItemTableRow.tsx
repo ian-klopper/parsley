@@ -4,8 +4,8 @@ import { FoodItem } from "@/lib/food-data";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { TableCell, TableRow } from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChevronDown, PlusCircle, Trash2 } from "lucide-react";
 import { SearchablePopover } from "./SearchablePopover";
 import { AddSizePopover } from "./AddSizePopover";
@@ -119,37 +119,37 @@ export const ItemTableRow = React.memo(({
 
     return (
         <TableRow className="border-b-0 group">
-            <TableCell className="align-top w-[20%]" onMouseEnter={() => setHoveredColumn(null)} onMouseLeave={() => setHoveredColumn(null)}>
-                <Input
-                    value={item.name}
-                    onChange={(e) => handleItemChange(index, 'name', e.target.value)}
-                    className="font-medium border-none shadow-none focus-visible:ring-0 p-0"
-                />
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <p className="text-sm text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap max-w-[200px]">
-                            {item.description}
-                        </p>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                        <p>{item.description}</p>
-                    </TooltipContent>
-                </Tooltip>
+            <TableCell className="align-middle w-[16%] py-2" onMouseEnter={() => setHoveredColumn(null)} onMouseLeave={() => setHoveredColumn(null)}>
+                <div className="flex flex-col gap-1">
+                    <Input
+                        value={item.name}
+                        onChange={(e) => handleItemChange(index, 'name', e.target.value)}
+                        className="font-medium border-none shadow-none focus-visible:ring-0 p-0"
+                        placeholder="Item name"
+                    />
+                    <Textarea
+                        value={item.description}
+                        onChange={(e) => handleItemChange(index, 'description', e.target.value)}
+                        className="text-sm text-muted-foreground border-none shadow-none focus-visible:ring-0 p-0 min-h-[40px] resize-none hover:resize-y"
+                        placeholder="Description"
+                        rows={2}
+                    />
+                </div>
             </TableCell>
-            <TableCell className="align-top w-[15%]" onMouseEnter={() => setHoveredColumn(null)} onMouseLeave={() => setHoveredColumn(null)}>
+            <TableCell className="align-middle w-[12%] py-2" onMouseEnter={() => setHoveredColumn(null)} onMouseLeave={() => setHoveredColumn(null)}>
                 <SearchablePopover
                     options={initialSubcategories}
                     onSelect={(subcategory) => handleItemChange(index, 'subcategory', subcategory)}
                     searchPlaceholder="Search..."
                     trigger={(
-                        <Button variant="ghost" className="w-[120px] max-w-[120px] justify-between p-0 font-normal border-none shadow-none focus:ring-0 focus-visible:ring-0 hover:bg-transparent">
+                        <Button variant="ghost" className="w-[100px] max-w-[100px] justify-between p-0 font-normal border-none shadow-none focus:ring-0 focus-visible:ring-0 hover:bg-transparent">
                             <span className="truncate">{item.subcategory || "Select"}</span>
                             <ChevronDown className="h-4 w-4 opacity-0 group-hover:opacity-50" />
                         </Button>
                     )}
                 />
             </TableCell>
-            <TableCell className="align-top w-[20%]" onMouseEnter={() => setHoveredColumn('menus')} onMouseLeave={() => setHoveredColumn(null)}>
+            <TableCell className="align-middle w-[16%] py-2" onMouseEnter={() => setHoveredColumn('menus')} onMouseLeave={() => setHoveredColumn(null)}>
     <div className="flex flex-wrap items-center gap-1">
         {menus.map((menu, menuIndex) => (
             menuIndex === menus.length - 1 ? (
@@ -203,7 +203,7 @@ export const ItemTableRow = React.memo(({
         )}
     </div>
 </TableCell>
-<TableCell className="align-top w-[20%]" onMouseEnter={() => setHoveredColumn('sizes')} onMouseLeave={() => setHoveredColumn(null)}>
+<TableCell className="align-middle w-[16%] py-2" onMouseEnter={() => setHoveredColumn('sizes')} onMouseLeave={() => setHoveredColumn(null)}>
     <div className="flex flex-wrap items-center gap-1">
         {item.sizes.map((sizeInfo, sizeIndex) => (
             sizeIndex === item.sizes.length - 1 ? (
@@ -251,7 +251,7 @@ export const ItemTableRow = React.memo(({
         )}
     </div>
 </TableCell>
-<TableCell className="align-top w-[20%]" onMouseEnter={() => setHoveredColumn('modifiers')} onMouseLeave={() => setHoveredColumn(null)}>
+<TableCell className="align-middle w-[16%] py-2" onMouseEnter={() => setHoveredColumn('modifiers')} onMouseLeave={() => setHoveredColumn(null)}>
     <div className="flex flex-wrap items-center gap-1">
         {modifierGroups.map((group, groupIndex) => (
             groupIndex === modifierGroups.length - 1 ? (
@@ -305,7 +305,7 @@ export const ItemTableRow = React.memo(({
         )}
     </div>
 </TableCell>
-            <TableCell className="align-top w-[5%]" onMouseEnter={() => setHoveredColumn(null)} onMouseLeave={() => setHoveredColumn(null)}>
+            <TableCell className="align-middle w-[24%] py-2" onMouseEnter={() => setHoveredColumn(null)} onMouseLeave={() => setHoveredColumn(null)}>
                 <Trash2
                     className="h-4 w-4 text-muted-foreground cursor-pointer hover:text-destructive transition-opacity opacity-0 group-hover:opacity-100"
                     onClick={() => handleDeleteItem(index)}

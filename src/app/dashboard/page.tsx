@@ -210,7 +210,7 @@ export default function Dashboard() {
     <main className="h-screen bg-background">
       <ResizablePanelGroup direction="horizontal" className="h-full w-full">
         <ResizablePanel defaultSize={75} minSize={50}>
-          <div className="p-4 h-full">
+          <div className="p-4 h-full overflow-auto">
             <div className="mb-6">
               <div className="flex items-center gap-4">
                 <BackButton />
