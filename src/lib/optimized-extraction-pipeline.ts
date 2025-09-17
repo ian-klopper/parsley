@@ -23,7 +23,8 @@ export interface DocumentMeta {
   id: string;
   name: string;
   type: string;
-  url: string;
+  url?: string;
+  content?: string; // Added for base64 content
   estimatedItemCount?: number;
   menuLocation?: string; // e.g., "pages 1-3", "cells A1:D50"
 }
@@ -204,7 +205,7 @@ export class OptimizedExtractionPipeline {
   private async analyzeDocumentStructure(doc: DocumentMeta): Promise<MenuIndex | null> {
     try {
       // Download and analyze document structure
-      const buffer = await this.downloadFile(doc.url);
+      const buffer = await this.getFileBuffer(doc);
 
       let analysisPrompt: string;
       let documentContent: string = '';
@@ -397,6 +398,17 @@ export class OptimizedExtractionPipeline {
   }
 
   // Helper methods (to be implemented)
+  private async getFileBuffer(doc: DocumentMeta): Promise<ArrayBuffer> {
+    if (doc.content) {
+      const buffer = Buffer.from(doc.content, 'base64');
+      return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+    }
+    if (doc.url) {
+      return this.downloadFile(doc.url);
+    }
+    throw new Error(`Document ${doc.name} has no content or url`);
+  }
+
   private async downloadFile(url: string): Promise<ArrayBuffer> {
     const response = await fetch(url);
     if (!response.ok) {
@@ -433,7 +445,7 @@ export class OptimizedExtractionPipeline {
         const baseEstimate = menuEntry?.estimatedItemCount || 10;
 
         // Make a small, focused AI call for precise estimation
-        const buffer = await this.downloadFile(doc.url);
+        const buffer = await this.getFileBuffer(doc);
         let estimationPrompt = '';
         let mediaParts: any[] = [];
 
@@ -599,68 +611,37 @@ export class OptimizedExtractionPipeline {
    */
   private async processTasksWithWorkerPool(tasks: ExtractionTask[]): Promise<TaskResult[]> {
     const results: TaskResult[] = [];
-    const CONCURRENT_LIMIT = 4; // Max 4 concurrent API calls
-    let completedTasks = 0;
+    const CONCURRENT_LIMIT = 4;
     let taskIndex = 0;
+    let hasFailed = false;
+    let firstError: string | undefined;
 
     const worker = async (): Promise<void> => {
-      while (taskIndex < tasks.length) {
+      while (taskIndex < tasks.length && !hasFailed) {
         const currentIndex = taskIndex++;
         const task = tasks[currentIndex];
         if (!task) continue;
 
         const startTime = Date.now();
-        let retryCount = 0;
-        let success = false;
-        let items: CoreLineItem[] = [];
-        let apiCalls = 0;
-        let error: string | undefined;
-
-        // Retry loop with exponential backoff
-        while (retryCount <= task.maxRetries && !success) {
-          try {
-            console.log(`  🔄 Processing ${task.id} (attempt ${retryCount + 1}/${task.maxRetries + 1})`);
-
-            const result = await this.processSingleTask(task);
-            items = result.items;
-            apiCalls += result.apiCalls;
-            success = true;
-
-            console.log(`  ✅ ${task.id}: ${items.length} items extracted`);
-
-          } catch (err) {
-            retryCount++;
-            apiCalls++; // Count failed attempts
-            error = err instanceof Error ? err.message : String(err);
-
-            if (retryCount <= task.maxRetries) {
-              const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 10000); // Exponential backoff, max 10s
-              const jitter = Math.random() * 500; // Add jitter to prevent thundering herd
-              const totalDelay = delay + jitter;
-
-              console.warn(`  ⚠️  ${task.id} failed (attempt ${retryCount}): ${error}`);
-              console.warn(`  🔄 Retrying in ${(totalDelay / 1000).toFixed(1)}s...`);
-
-              await new Promise(resolve => setTimeout(resolve, totalDelay));
-            } else {
-              console.error(`  ❌ ${task.id} failed after ${retryCount} attempts: ${error}`);
-            }
+        try {
+          console.log(`  🔄 Processing ${task.id}`);
+          const result = await this.processSingleTask(task);
+          results.push({
+            taskId: task.id,
+            items: result.items,
+            apiCalls: result.apiCalls,
+            retryCount: 0,
+            processingTimeMs: Date.now() - startTime,
+            success: true,
+          });
+          console.log(`  ✅ ${task.id}: ${result.items.length} items extracted`);
+        } catch (err) {
+          if (!hasFailed) {
+            hasFailed = true;
+            firstError = `Task ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`;
+            console.error(`  ❌ ${firstError}`);
           }
         }
-
-        const processingTime = Date.now() - startTime;
-        results.push({
-          taskId: task.id,
-          items,
-          apiCalls,
-          retryCount,
-          processingTimeMs: processingTime,
-          success,
-          error: success ? undefined : error
-        });
-
-        completedTasks++;
-        console.log(`  📊 Progress: ${completedTasks}/${tasks.length} tasks completed`);
       }
     };
 
@@ -670,9 +651,12 @@ export class OptimizedExtractionPipeline {
       Array.from({ length: Math.min(CONCURRENT_LIMIT, tasks.length) }, worker)
     );
 
+    if (hasFailed) {
+      throw new Error(firstError || 'A task failed during extraction.');
+    }
+
     const successCount = results.filter(r => r.success).length;
-    const failureCount = results.length - successCount;
-    console.log(`📊 Worker pool complete: ${successCount} success, ${failureCount} failures`);
+    console.log(`📊 Worker pool complete: ${successCount} success, 0 failures`);
 
     return results;
   }
@@ -1249,11 +1233,11 @@ Return ONLY a JSON object in this format:
 
     for (const doc of batch.documents) {
       if (doc.type === 'application/pdf') {
-        const buffer = await this.downloadFile(doc.url);
+        const buffer = await this.getFileBuffer(doc);
         const text = await this.extractPdfTextSample(buffer);
         textContent += `\n=== ${doc.name} ===\n${text}\n`;
       } else if (doc.type.startsWith('image/')) {
-        const buffer = await this.downloadFile(doc.url);
+        const buffer = await this.getFileBuffer(doc);
         const base64 = this.bufferToBase64(buffer);
         imageParts.push({
           inlineData: {
@@ -1263,7 +1247,7 @@ Return ONLY a JSON object in this format:
         });
         textContent += `\n=== ${doc.name} ===\nImage Document: ${doc.name}\n[Content will be processed by AI vision]\n`;
       } else if (doc.type.includes('spreadsheet') || doc.type.includes('excel')) {
-        const buffer = await this.downloadFile(doc.url);
+        const buffer = await this.getFileBuffer(doc);
         const text = await this.extractSpreadsheetSample(buffer);
         textContent += `\n=== ${doc.name} ===\n${text}\n`;
       }
@@ -1469,11 +1453,11 @@ REMINDER: Extract ONLY items that you can actually see in the provided content. 
 
       for (const doc of documents) {
         if (doc.type === 'application/pdf') {
-          const buffer = await this.downloadFile(doc.url);
+          const buffer = await this.getFileBuffer(doc);
           const text = await this.extractPdfTextSample(buffer);
           contextText += `\n=== ${doc.name} ===\n${text}\n`;
         } else if (doc.type.startsWith('image/')) {
-          const buffer = await this.downloadFile(doc.url);
+          const buffer = await this.getFileBuffer(doc);
           const base64 = this.bufferToBase64(buffer);
           imageParts.push({
             inlineData: {
@@ -1483,7 +1467,7 @@ REMINDER: Extract ONLY items that you can actually see in the provided content. 
           });
           contextText += `\n=== ${doc.name} ===\nImage Document: ${doc.name}\n[Content analyzed by expert AI]\n`;
         } else if (doc.type.includes('spreadsheet') || doc.type.includes('excel')) {
-          const buffer = await this.downloadFile(doc.url);
+          const buffer = await this.getFileBuffer(doc);
           const text = await this.extractSpreadsheetSample(buffer);
           contextText += `\n=== ${doc.name} ===\n${text}\n`;
         }

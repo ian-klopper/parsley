@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { StorageService, JobDocument, UploadResult } from '@/lib/storage-service';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/lib/supabase-browser';
 
 interface UploadState {
   isUploading: boolean;
@@ -15,6 +16,7 @@ interface UploadState {
 }
 
 export function useFileUpload(jobId: string) {
+  const { toast } = useToast();
   const [uploadState, setUploadState] = useState<UploadState>({
     isUploading: false,
     progress: 0,
@@ -24,8 +26,33 @@ export function useFileUpload(jobId: string) {
     totalFiles: 0
   });
 
-  const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!jobId) return;
+
+    const channel = supabase
+      .channel(`documents-${jobId}-realtime`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'job_documents',
+          filter: `job_id=eq.${jobId}`,
+        },
+        (payload) => {
+          queryClient.invalidateQueries({ queryKey: ['job-documents', jobId] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (jobId) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [jobId, queryClient]);
 
   // Query to get job documents
   const {
@@ -43,7 +70,6 @@ export function useFileUpload(jobId: string) {
     },
     enabled: !!jobId,
     staleTime: 1000 * 30, // 30 seconds for faster updates
-    refetchInterval: 3000, // Refetch every 3 seconds for real-time updates
   });
 
   // Upload mutation

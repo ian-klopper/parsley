@@ -229,8 +229,13 @@ export async function GET(
       .eq('extraction_status', 'completed')
       .order('created_at', { ascending: false });
 
-    if (extractionError || !allExtractions || allExtractions.length === 0) {
-      // No extraction results found - return empty array
+    if (extractionError) {
+      console.error('Error fetching extractions:', extractionError);
+      return Response.json({ error: 'Failed to fetch extractions' }, { status: 500 });
+    }
+
+    if (!allExtractions || allExtractions.length === 0) {
+      // No extraction results found - return empty array with 200 OK
       return Response.json({
         success: true,
         data: {
@@ -267,7 +272,7 @@ export async function GET(
         )
       `)
       .eq('job_id', jobId)
-      .eq('extraction_id', extractionResult.id);
+      .eq('extraction_id', latestExtraction.id);
 
     console.log(`📊 GET: Found ${menuItems?.length || 0} menu items`);
 
@@ -416,30 +421,26 @@ export async function POST(
       );
     }
 
-    // Create signed URLs for documents to ensure server/external access (in case bucket is private)
-    const STORAGE_BUCKET = 'job-documents';
-    const signedDocuments: JobDocument[] = await Promise.all(
+    // Download file content instead of creating signed URLs
+    const documentMetas: DocumentMeta[] = await Promise.all(
       (documents || []).map(async (doc) => {
-        try {
-          const { data: signed, error: signErr } = await supabase
-            .storage
-            .from(STORAGE_BUCKET)
-            .createSignedUrl(doc.storage_path, 60 * 60); // 1 hour
+        const { data, error } = await supabase.storage
+          .from('job-documents')
+          .download(doc.storage_path);
 
-          if (signErr) {
-            console.warn('Failed to sign URL for', doc.storage_path, signErr.message);
-            return doc;
-          }
-
-          if (signed?.signedUrl) {
-            return { ...doc, file_url: signed.signedUrl } as JobDocument;
-          }
-
-          return doc;
-        } catch (e) {
-          console.warn('Error creating signed URL for', doc.storage_path, e);
-          return doc;
+        if (error) {
+          throw new Error(`Failed to download document ${doc.file_name}: ${error.message}`);
         }
+
+        const buffer = await data.arrayBuffer();
+        const base64 = Buffer.from(buffer).toString('base64');
+
+        return {
+          id: doc.id,
+          name: doc.file_name,
+          type: doc.file_type,
+          content: base64, // Pass content instead of URL
+        };
       })
     );
 
@@ -454,8 +455,8 @@ export async function POST(
     }
 
     // Log extraction initiation with butler-style description
-  const fileTypes = signedDocuments.map(doc => doc.file_type.split('/')[1]?.toUpperCase() || 'FILE').join(', ');
-  const totalSize = signedDocuments.reduce((sum, doc) => sum + doc.file_size, 0);
+  const fileTypes = documents.map(doc => doc.file_type.split('/')[1]?.toUpperCase() || 'FILE').join(', ');
+  const totalSize = documents.reduce((sum, doc) => sum + doc.file_size, 0);
     const formattedSize = formatFileSize(totalSize);
 
     await ActivityLogger.logJobActivity(
@@ -464,7 +465,7 @@ export async function POST(
       jobId,
       {
         description: `Sir ${user.full_name || user.email} has requested that I analyze ${documents.length} document${documents.length > 1 ? 's' : ''} for the establishment "${job.venue}". I shall commence the extraction process forthwith, examining ${fileTypes} files totalling ${formattedSize} to discern the culinary offerings contained within.`,
-        documents: signedDocuments.map(doc => doc.file_name),
+        documents: documents.map(doc => doc.file_name),
         total_files: documents.length,
         total_size: formattedSize,
         file_types: fileTypes,
@@ -510,14 +511,6 @@ export async function POST(
     let extractionResult;
     try {
       console.log('🚀 Starting optimized extraction pipeline');
-
-      // Convert documents to DocumentMeta format for optimized pipeline
-      const documentMetas: DocumentMeta[] = signedDocuments.map(doc => ({
-        id: doc.id,
-        name: doc.file_name,
-        type: doc.file_type,
-        url: doc.file_url
-      }));
 
       const optimizedPipeline = new OptimizedExtractionPipeline();
       const optimizedResult = await optimizedPipeline.processDocumentsOptimized(documentMetas);
@@ -596,7 +589,7 @@ export async function POST(
         {
           description: `I regret to inform you that the extraction process for "${job.venue}" has encountered an unexpected difficulty with the artificial intelligence service. The error appears to be: "${extractionError instanceof Error ? extractionError.message : 'Unknown error'}". I recommend reviewing the documents and perhaps trying again momentarily.`,
           error: extractionError instanceof Error ? extractionError.message : 'Unknown extraction error',
-          documents_attempted: signedDocuments.map(doc => doc.file_name),
+          documents_attempted: documents.map(doc => doc.file_name),
           extraction_duration: 0,
           job_venue: job.venue,
           job_number: job.job_id
@@ -633,7 +626,7 @@ export async function POST(
         {
           description: `I regret to inform you that the extraction process for "${job.venue}" has encountered an unexpected difficulty. ${extractionResult.error || 'The analysis could not be completed successfully'}. I recommend reviewing the documents and perhaps trying again momentarily.`,
           error: extractionResult.error || 'Extraction failed',
-          documents_attempted: extractionResult.documentsProcessed || signedDocuments.map(doc => doc.file_name),
+          documents_attempted: extractionResult.documentsProcessed || documents.map(doc => doc.file_name),
           extraction_duration: extractionResult.extractionDuration,
           job_venue: job.venue,
           job_number: job.job_id

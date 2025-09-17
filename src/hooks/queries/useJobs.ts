@@ -1,13 +1,34 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { JobService, Job, CreateJobRequest, UpdateJobRequest } from '@/lib/job-service';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/lib/supabase-browser';
 
 const JOBS_QUERY_KEY = 'jobs';
 
-// Get all jobs with caching
+// Get all jobs with caching and real-time updates
 export function useJobs() {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('jobs-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'jobs' },
+        (payload) => {
+          queryClient.invalidateQueries({ queryKey: [JOBS_QUERY_KEY] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
+
   return useQuery({
     queryKey: [JOBS_QUERY_KEY],
     queryFn: async () => {
@@ -22,8 +43,37 @@ export function useJobs() {
   });
 }
 
-// Get single job with caching
+// Get single job with caching and real-time updates
 export function useJob(id: string) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!id) return;
+
+    const channel = supabase
+      .channel(`job-${id}-realtime`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'jobs',
+          filter: `id=eq.${id}`,
+        },
+        (payload) => {
+          queryClient.setQueryData([JOBS_QUERY_KEY, id], payload.new);
+          queryClient.invalidateQueries({ queryKey: [JOBS_QUERY_KEY] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (id) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [id, queryClient]);
+
   return useQuery({
     queryKey: [JOBS_QUERY_KEY, id],
     queryFn: async () => {
@@ -34,8 +84,7 @@ export function useJob(id: string) {
       return result.data;
     },
     enabled: !!id,
-    staleTime: 1000 * 60, // 1 minute for faster job status updates
-    refetchInterval: 5000, // Refetch every 5 seconds to track job status changes
+    staleTime: 1000 * 60, // 1 minute
   });
 }
 
@@ -232,20 +281,47 @@ export function useTransferOwnership() {
   });
 }
 
-// Get extraction results for a job
+// Get extraction results for a job with real-time updates
 export function useJobExtractionResults(jobId: string) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!jobId) return;
+
+    const channel = supabase
+      .channel(`extraction-${jobId}-realtime`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'extraction_results',
+          filter: `job_id=eq.${jobId}`,
+        },
+        (payload) => {
+          queryClient.invalidateQueries({ queryKey: [JOBS_QUERY_KEY, jobId, 'extraction'] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (jobId) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [jobId, queryClient]);
+
   return useQuery({
     queryKey: [JOBS_QUERY_KEY, jobId, 'extraction'],
     queryFn: async () => {
       const result = await JobService.getExtractionResults(jobId);
-      if (result.error) {
+      if (result.error && !result.error.includes('No extraction results found')) {
         throw new Error(result.error);
       }
       return result.data;
     },
     enabled: !!jobId,
-    staleTime: 1000 * 30, // 30 seconds for faster updates
-    refetchInterval: 2000, // Refetch every 2 seconds for real-time extraction progress
+    staleTime: 1000 * 30, // 30 seconds
   });
 }
 

@@ -45,7 +45,7 @@ import { formatCost, getCostColor, estimateExtractionCost } from "@/lib/extracti
 
 // React Query hooks - instant updates!
 import { useJob, useUpdateJob, useDeleteJob, useTransferOwnership, useJobExtractionResults, useStartExtraction } from "@/hooks/queries/useJobs"
-import { useUsers, useActiveUsers } from "@/hooks/queries/useUsers"
+import { useUsers } from "@/hooks/queries/useUsers"
 import { useFileUpload } from "@/hooks/useFileUpload"
 import { useToast } from "@/hooks/use-toast"
 import { FilePreviewPanel } from "@/components/file-preview/FilePreviewPanel"
@@ -82,7 +82,6 @@ function JobPageContent() {
   // React Query hooks with caching and optimistic updates
   const { data: job, isLoading: jobLoading, error: jobError } = useJob(jobId || '');
   const { data: users = [], isLoading: usersLoading } = useUsers();
-  const { data: activeUsers = [] } = useActiveUsers();
   const { data: extractionResults, isLoading: extractionLoading } = useJobExtractionResults(jobId || '');
   const startExtractionMutation = useStartExtraction();
 
@@ -692,9 +691,9 @@ function JobPageContent() {
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">Select collaborators and choose an owner (crown icon)</p>
             <div className="space-y-2 max-h-64 overflow-y-auto p-2 dark:bg-black rounded-lg">
-              {activeUsers.length === 0 ? (
+              {users.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">No team members available</p>
-              ) : activeUsers.map((user) => {
+              ) : users.map((user) => {
                 const isCollaborator = selectedCollaborators.includes(user.id);
                 const isOwner = selectedOwner === user.id;
                 return (

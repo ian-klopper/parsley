@@ -45,7 +45,7 @@ import Link from "next/link"
 
 // React Query hooks - instant updates!
 import { useJobs, useCreateJob, useDeleteJob, useTransferOwnership } from "@/hooks/queries/useJobs"
-import { useUsers, useActiveUsers } from "@/hooks/queries/useUsers"
+import { useUsers } from "@/hooks/queries/useUsers"
 
 export default function Dashboard() {
   const { theme } = useTheme();
@@ -56,7 +56,6 @@ export default function Dashboard() {
   // React Query - with caching and optimistic updates
   const { data: jobs = [], isLoading: jobsLoading, error: jobsError } = useJobs();
   const { data: users = [], isLoading: usersLoading } = useUsers();
-  const { data: activeUsers = [] } = useActiveUsers();
   const createJobMutation = useCreateJob();
   const deleteJobMutation = useDeleteJob();
   const transferOwnershipMutation = useTransferOwnership();
@@ -445,9 +444,9 @@ export default function Dashboard() {
               <Label>Team Members</Label>
               <p className="text-xs text-muted-foreground mb-2">Select collaborators and choose an owner (crown icon)</p>
               <div className="space-y-2 max-h-64 overflow-y-auto p-2 dark:bg-black rounded-lg">
-                {activeUsers.length === 0 ? (
+                {users.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">No team members available</p>
-                ) : activeUsers.map((user) => {
+                ) : users.map((user) => {
                   console.log(user);
                   const isCollaborator = selectedCollaborators.includes(user.id);
                   const isOwner = selectedOwner === user.id;
