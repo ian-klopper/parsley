@@ -178,9 +178,10 @@ export async function POST(request: NextRequest) {
       job.id,
       {
         venue: job.venue,
-        job_id: job.job_id,
+        job_number: job.job_id,
         owner_id: job.owner_id,
-        collaborator_count: finalCollaborators.length
+        collaborator_count: finalCollaborators.length,
+        user_name: user.full_name || user.email
       }
     );
 

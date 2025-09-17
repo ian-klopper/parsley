@@ -11,7 +11,17 @@ export async function createSupabaseServer() {
     {
       cookies: {
         get(name: string) {
-          return cookieStore.get(name)?.value;
+          const raw = cookieStore.get(name)?.value;
+          if (!raw) return undefined as any;
+          // Normalize accidental double-encoded JSON strings
+          if (raw.length > 1 && raw.startsWith('"') && raw.endsWith('"')) {
+            try {
+              return raw.slice(1, -1) as any;
+            } catch {
+              return raw as any;
+            }
+          }
+          return raw as any;
         },
         set(name: string, value: string, options: any) {
           try {

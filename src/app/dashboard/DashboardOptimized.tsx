@@ -100,13 +100,16 @@ export default function DashboardOptimized() {
       status: 'draft' as const
     };
 
-    // Optimistic update - UI updates instantly!
+    // Create job and navigate to it once created
     createJobMutation.mutate(jobData, {
-      onSuccess: () => {
+      onSuccess: (createdJob) => {
         setCreateJobDialog(false);
         setNewJob({ venue: '', jobId: '' });
         setSelectedCollaborators([]);
         setSelectedOwner('');
+
+        // Navigate to the newly created job with the real ID
+        router.push(`/job?id=${createdJob.id}`);
       }
     });
   };

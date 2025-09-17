@@ -69,6 +69,54 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ jobId }) => 
     }
   }, [jobId]);
 
+  // Watch for document changes and regenerate previews immediately
+  useEffect(() => {
+    if (documents.length === 0) return;
+
+    // Check if we have new documents that don't have previews yet
+    const newDocuments = documents.filter(doc =>
+      !previews.find(preview => preview.id.startsWith(doc.file_name))
+    );
+
+    if (newDocuments.length > 0) {
+      // Generate previews for new documents immediately
+      const generateNewPreviews = async () => {
+        const newPreviewPromises = newDocuments.map(async (doc) => {
+          try {
+            const previewUrl = await StorageService.getFilePreviewUrl(doc.storage_path);
+            const fileType = FilePreviewService.getFileType(doc.file_name, doc.file_type);
+
+            return await FilePreviewService.generatePreview(
+              previewUrl,
+              fileType,
+              doc.file_name
+            );
+          } catch (error) {
+            console.error(`Failed to generate preview for ${doc.file_name}:`, error);
+            return {
+              id: `${doc.file_name}-${Date.now()}`,
+              type: 'image' as const,
+              error: error instanceof Error ? error.message : 'Preview generation failed'
+            };
+          }
+        });
+
+        const newGeneratedPreviews = await Promise.all(newPreviewPromises);
+
+        // Add new previews to existing ones
+        setPreviews(existingPreviews => {
+          // Remove any old previews for the same files
+          const filteredExisting = existingPreviews.filter(preview =>
+            !newDocuments.find(doc => preview.id.startsWith(doc.file_name))
+          );
+          return [...filteredExisting, ...newGeneratedPreviews];
+        });
+      };
+
+      generateNewPreviews();
+    }
+  }, [documents]);
+
   const renderPreview = (preview: FilePreview, document: JobDocument) => {
     if (preview.error) {
       return (

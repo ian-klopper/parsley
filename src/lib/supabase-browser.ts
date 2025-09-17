@@ -16,7 +16,18 @@ export function createClient() {
           if (typeof document === 'undefined') return undefined
           const cookies = document.cookie.split('; ')
           const cookie = cookies.find(c => c.startsWith(`${name}=`))
-          return cookie ? decodeURIComponent(cookie.split('=')[1]) : undefined
+          if (!cookie) return undefined
+          let value = decodeURIComponent(cookie.split('=')[1])
+          // Normalize accidental double-encoded JSON strings (e.g., "{...}")
+          if (value.length > 1 && value.startsWith('"') && value.endsWith('"')) {
+            try {
+              // Remove the wrapping quotes so the library's JSON.parse returns an object
+              value = value.slice(1, -1)
+            } catch (_) {
+              // no-op; return original value
+            }
+          }
+          return value
         },
         set(name: string, value: string, options?: any) {
           if (typeof document === 'undefined') return

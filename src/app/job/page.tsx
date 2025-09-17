@@ -41,20 +41,21 @@ import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
 import { LoadingWithTips } from "@/components/LoadingWithTips";
 import { jobTips } from "@/lib/loading-tips";
+import { formatCost, getCostColor, estimateExtractionCost } from "@/lib/extraction-cost-calculator";
 
 // React Query hooks - instant updates!
-import { useJob, useUpdateJob, useDeleteJob, useTransferOwnership } from "@/hooks/queries/useJobs"
+import { useJob, useUpdateJob, useDeleteJob, useTransferOwnership, useJobExtractionResults, useStartExtraction } from "@/hooks/queries/useJobs"
 import { useUsers, useActiveUsers } from "@/hooks/queries/useUsers"
 import { useFileUpload } from "@/hooks/useFileUpload"
+import { useToast } from "@/hooks/use-toast"
 import { FilePreviewPanel } from "@/components/file-preview/FilePreviewPanel"
-import { MockExtractionResults } from "@/components/MockExtractionResults"
 
 const ItemTable = dynamic(() => import("@/components/ItemTable").then(mod => ({ default: mod.ItemTable })), {
   loading: () => <div className="animate-pulse h-32 bg-muted rounded">Loading table...</div>
 });
 
-import { allItems, FoodItem } from "@/lib/food-data";
-import { tabCategories } from "@/lib/menu-data";
+import { FoodItem } from "@/lib/food-data";
+import { tabCategories, allTabs } from "@/lib/menu-data";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { UserService } from "@/lib/user-service";
@@ -75,18 +76,22 @@ function JobPageContent() {
   const { theme } = useTheme();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { toast } = useToast();
   const jobId = searchParams.get('id');
 
   // React Query hooks with caching and optimistic updates
   const { data: job, isLoading: jobLoading, error: jobError } = useJob(jobId || '');
   const { data: users = [], isLoading: usersLoading } = useUsers();
   const { data: activeUsers = [] } = useActiveUsers();
+  const { data: extractionResults, isLoading: extractionLoading } = useJobExtractionResults(jobId || '');
+  const startExtractionMutation = useStartExtraction();
 
   // File upload hook
   const {
     documents,
     isLoadingDocuments,
     uploadFile,
+    uploadFiles,
     deleteDocument,
     getDownloadUrl,
     uploadState,
@@ -105,31 +110,27 @@ function JobPageContent() {
   const [collaboratorsDialog, setCollaboratorsDialog] = useState(false);
   const [selectedCollaborators, setSelectedCollaborators] = useState<string[]>([]);
   const [selectedOwner, setSelectedOwner] = useState<string>('');
-  const [items, setItems] = useState<FoodItem[]>(allItems);
+  const [items, setItems] = useState<FoodItem[]>([]);
+  const [organizedData, setOrganizedData] = useState<any>({});
   const [extractionStarted, setExtractionStarted] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [showResults, setShowResults] = useState(false);
   const [transferOwnershipDialog, setTransferOwnershipDialog] = useState(false);
   const [newOwnerEmail, setNewOwnerEmail] = useState('');
   const [deleteDialog, setDeleteDialog] = useState(false);
 
-  const tabs = [
-    "Food",
-    "Cocktails + Shots",
-    "Beer + RTDs",
-    "Wine",
-    "Liquor",
-    "N/A + Mocktails",
-    "Merchandise",
-    "Menu Structure",
-    "Modifiers",
-  ];
+  const tabs = allTabs;
 
   const getItemsForTab = useCallback((tab: string) => {
+    // For organized data, return data directly from the tab
+    if (organizedData && organizedData[tab]) {
+      return organizedData[tab] || [];
+    }
+
+    // Fallback to legacy filtering for backward compatibility
     const categories = tabCategories[tab];
     if (!categories) return [];
     return items.filter(item => categories.includes(item.subcategory));
-  }, [items]);
+  }, [organizedData, items]);
 
   const handleItemsChange = useCallback((updatedItems: FoodItem[], tab: string) => {
     const categories = tabCategories[tab];
@@ -153,6 +154,27 @@ function JobPageContent() {
       setSelectedOwner(job.owner_id || '');
     }
   }, [job]);
+
+  // Derived state for extraction completion
+  const hasExtractionResults = extractionResults?.success && extractionResults?.data?.hasResults;
+  const isExtractionComplete = job?.status === 'complete' && hasExtractionResults;
+
+  // Calculate total item count from organized data or items directly
+  const extractionItemCount = organizedData?.overview?.totalItems ||
+    (organizedData?.items?.length) ||
+    (extractionResults?.data?.items?.length) ||
+    0;
+
+  // Update organized data and items when extraction results load
+  useEffect(() => {
+    if (extractionResults?.success && extractionResults?.data) {
+      const organized = extractionResults.data.organizedData;
+      const items = extractionResults.data.items || [];
+
+      setOrganizedData(organized);
+      setItems(items);
+    }
+  }, [extractionResults]);
 
   if (!mounted || jobLoading || usersLoading) {
     return <LoadingWithTips tips={jobTips} />;
@@ -179,6 +201,24 @@ function JobPageContent() {
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <p className="text-muted-foreground">No job ID provided</p>
+          <Button
+            onClick={() => router.push('/dashboard')}
+            className="mt-4"
+          >
+            Back to Dashboard
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Check for temporary IDs and redirect to dashboard
+  if (jobId.startsWith('temp-')) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <p className="text-muted-foreground">Job is still being created...</p>
+          <p className="text-sm text-muted-foreground mb-4">Please wait a moment and try again.</p>
           <Button
             onClick={() => router.push('/dashboard')}
             className="mt-4"
@@ -249,16 +289,35 @@ function JobPageContent() {
   };
 
   const handleStartExtraction = async () => {
-    if (!documents || documents.length === 0) return;
+    if (!documents || documents.length === 0 || !job?.id) return;
 
     setIsProcessing(true);
     setExtractionStarted(true);
 
-    // Simulate processing for 3 seconds
-    setTimeout(() => {
+    try {
+      const result = await startExtractionMutation.mutateAsync(job.id);
+
+      // Update organized data and items immediately from POST response for instant UI refresh
+      const organized = result?.data?.organizedData;
+      if (organized && typeof organized === 'object') {
+        setOrganizedData(organized);
+        const allItems: FoodItem[] = [];
+        Object.entries(organized).forEach(([tabName, tabData]) => {
+          if (Array.isArray(tabData) && tabName !== 'Menu Structure') {
+            allItems.push(...(tabData as FoodItem[]));
+          }
+        });
+        setItems(allItems);
+      } else if (result?.data?.items && Array.isArray(result.data.items)) {
+        // Fallback: if only items returned
+        setItems(result.data.items);
+      }
+    } catch (error) {
+      // Error is already handled by the mutation's onError
+      console.error('Extraction error:', error);
+    } finally {
       setIsProcessing(false);
-      setShowResults(true);
-    }, 3000);
+    }
   };
 
 
@@ -300,7 +359,7 @@ function JobPageContent() {
       {/* Main Content */}
       <div className="flex-1 overflow-hidden">
         <ResizablePanelGroup direction="horizontal" className="h-full">
-          <ResizablePanel defaultSize={75} minSize={50} className="h-full">
+          <ResizablePanel defaultSize={75} minSize={50} className="h-full bg-background">
             <div className="h-full flex flex-col">
               {/* Header */}
               <div className="p-4">
@@ -354,28 +413,94 @@ function JobPageContent() {
                 </div>
               </div>
               <div className="flex-1 flex flex-col overflow-hidden">
-                <div className="sticky top-0 z-10 bg-background">
-                  <Tabs defaultValue="Food" className="p-4 pb-0">
-                    <TabsList className="flex flex-wrap gap-1 h-auto bg-transparent p-0 justify-start">
-                      {tabs.map((tab) => (
-                        <TabsTrigger key={tab} value={tab} className="text-xs flex-shrink-0">
-                          {tab}
-                        </TabsTrigger>
-                      ))}
-                    </TabsList>
-                  </Tabs>
-                </div>
                 <div className="flex-1 overflow-auto">
-                  <div className="p-4 pt-0">
+                  <div className="p-4">
                     <Tabs defaultValue="Food">
+                      <div className="sticky top-0 z-10 bg-background pb-4">
+                        <TabsList className="flex flex-wrap gap-1 h-auto bg-transparent p-0 justify-start">
+                          {tabs.map((tab) => (
+                            <TabsTrigger key={tab} value={tab} className="text-xs flex-shrink-0">
+                              {tab}
+                            </TabsTrigger>
+                          ))}
+                        </TabsList>
+                      </div>
                       {tabs.map((tab) => (
                         <TabsContent key={tab} value={tab} className="mt-4">
-                          <ItemTable
-                            items={getItemsForTab(tab)}
-                            tab={tab}
-                            onItemsChange={handleItemsChange}
-                            readonly={!canEdit}
-                          />
+                          {tab === 'Menu Structure' ? (
+                            <div className="space-y-2">
+                              <h3 className="font-medium">Menu Names</h3>
+                              <div className="border rounded p-4 bg-gray-50">
+                                {getItemsForTab(tab).length > 0 ? (
+                                  <ul className="space-y-1">
+                                    {getItemsForTab(tab).map((menu: string, index: number) => (
+                                      <li key={index} className="text-sm">• {menu}</li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <p className="text-sm text-gray-500">No menu names found</p>
+                                )}
+                              </div>
+                            </div>
+                          ) : tab === 'Modifiers' ? (
+                            <div className="space-y-4">
+                              <div>
+                                <h3 className="font-medium mb-2">Food Modifiers</h3>
+                                <div className="border rounded p-4 bg-gray-50">
+                                  {getItemsForTab(tab)?.food?.length > 0 ? (
+                                    <div className="space-y-3">
+                                      {getItemsForTab(tab).food.map((group: any, index: number) => (
+                                        <div key={index} className="border-b pb-2 last:border-b-0">
+                                          <h4 className="font-medium text-sm">{group.name}</h4>
+                                          {group.options?.length > 0 && (
+                                            <ul className="mt-1 space-y-1">
+                                              {group.options.map((option: any, optIndex: number) => (
+                                                <li key={optIndex} className="text-xs text-gray-600 ml-2">
+                                                  • {option.name} {option.price && `(+$${option.price})`}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-gray-500">No food modifiers found</p>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <h3 className="font-medium mb-2">Beverage Modifiers</h3>
+                                <div className="border rounded p-4 bg-gray-50">
+                                  {getItemsForTab(tab)?.beverage?.length > 0 ? (
+                                    <div className="space-y-3">
+                                      {getItemsForTab(tab).beverage.map((group: any, index: number) => (
+                                        <div key={index} className="border-b pb-2 last:border-b-0">
+                                          <h4 className="font-medium text-sm">{group.name}</h4>
+                                          {group.options?.length > 0 && (
+                                            <ul className="mt-1 space-y-1">
+                                              {group.options.map((option: any, optIndex: number) => (
+                                                <li key={optIndex} className="text-xs text-gray-600 ml-2">
+                                                  • {option.name} {option.price && `(+$${option.price})`}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-gray-500">No beverage modifiers found</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <ItemTable
+                              items={getItemsForTab(tab)}
+                              onItemsChange={(updated) => handleItemsChange(updated, tab)}
+                            />
+                          )}
                         </TabsContent>
                       ))}
                     </Tabs>
@@ -404,10 +529,11 @@ function JobPageContent() {
                       id="file-upload-job"
                       className="hidden"
                       accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.csv"
+                      multiple
                       onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          uploadFile(file);
+                        const files = e.target.files;
+                        if (files && files.length > 0) {
+                          uploadFiles(files);
                           // Reset input
                           e.target.value = '';
                         }
@@ -427,7 +553,7 @@ function JobPageContent() {
                         <p className="text-sm font-medium">
                           {isUploading ? 'Uploading...' : 'Click to upload or drag and drop'}
                         </p>
-                        <p className="text-xs text-muted-foreground">PDF, PNG, JPG, Excel, CSV (max 10MB)</p>
+                        <p className="text-xs text-muted-foreground">PDF, PNG, JPG, Excel, CSV (max 10MB each) • Multiple files supported</p>
                       </div>
                     </label>
 
@@ -452,13 +578,15 @@ function JobPageContent() {
                     )}
                   </div>
 
-                  {/* Start Extraction Button */}
+                  {/* Extraction Button */}
                   <button
                     onClick={handleStartExtraction}
                     disabled={!documents || documents.length === 0 || isProcessing}
                     className={`w-full py-3 px-4 rounded-lg font-medium transition-all ${
                       !documents || documents.length === 0 || isProcessing
                         ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : isExtractionComplete
+                        ? 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'
                         : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm hover:shadow-md'
                     }`}
                   >
@@ -467,14 +595,83 @@ function JobPageContent() {
                         <div className="w-4 h-4 border-2 border-gray-300 border-t-white rounded-full animate-spin"></div>
                         Processing...
                       </div>
+                    ) : isExtractionComplete ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M4 4h12v2H4zM4 9h12v2H4zM4 14h12v2H4z" />
+                        </svg>
+                        Retry Extraction ({extractionItemCount} items found)
+                      </div>
                     ) : (
                       'Start Extraction'
                     )}
                   </button>
 
-                  {/* Extraction Results */}
-                  {showResults && documents && (
-                    <MockExtractionResults documents={documents} />
+                  {/* Cost Estimate */}
+                  {documents && documents.length > 0 && !isExtractionComplete && (
+                    <div className="mt-2 text-xs text-gray-500 text-center">
+                      Estimated cost: {formatCost(estimateExtractionCost(
+                        documents.length,
+                        Math.max(20, documents.length * 15), // Estimate 15-20 items per document
+                        documents.some(doc => doc.file_type?.startsWith('image/'))
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Extraction Summary */}
+                  {isExtractionComplete && (
+                    <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="text-sm text-green-800">
+                        <div className="font-medium mb-1">✅ Extraction Complete</div>
+                        <div className="text-xs text-green-600">
+                          Extracted {extractionItemCount} menu items • Results displayed in table
+                        </div>
+                        {/* Extraction Costs */}
+                        {extractionResults?.data?.extractions && extractionResults.data.extractions.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {extractionResults.data.extractions.map((extraction, index) => (
+                              <div key={extraction.id} className="text-xs text-green-600 flex justify-between items-center">
+                                <span>
+                                  <span className="font-medium">Extraction {index + 1}:</span>{' '}
+                                  {extraction.itemCount} items
+                                  {extraction.apiCallsCount && (
+                                    <span className="text-gray-500 ml-1">
+                                      ({extraction.apiCallsCount} API calls)
+                                    </span>
+                                  )}
+                                </span>
+                                <span className={getCostColor(extraction.extractionCost || 0)}>
+                                  {formatCost(extraction.extractionCost || 0)}
+                                </span>
+                              </div>
+                            ))}
+                            {extractionResults.data.extractions.length > 1 && (
+                              <div className="text-xs text-green-700 font-medium border-t pt-1 flex justify-between">
+                                <span>Total ({extractionResults.data.extractions.length} extractions):</span>
+                                <span className={getCostColor(
+                                  extractionResults.data.extractions.reduce((sum, ext) => sum + (ext.extractionCost || 0), 0)
+                                )}>
+                                  {formatCost(
+                                    extractionResults.data.extractions.reduce((sum, ext) => sum + (ext.extractionCost || 0), 0)
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {/* Temporary Debug Display */}
+                        {items.length > 0 && process.env.NODE_ENV === 'development' && (
+                          <details className="mt-2 text-xs">
+                            <summary className="cursor-pointer text-gray-500">Debug: Categories</summary>
+                            <div className="mt-1 p-2 bg-white rounded border text-xs">
+                              <div><strong>Categories found:</strong> {[...new Set(items.map(item => item.subcategory))].join(', ')}</div>
+                              <div><strong>Food tab items:</strong> {getItemsForTab('Food').length}</div>
+                              <div><strong>N/A tab items:</strong> {getItemsForTab('N/A + Mocktails').length}</div>
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    </div>
                   )}
 
                   {/* File Previews */}

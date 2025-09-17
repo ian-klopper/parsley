@@ -20,7 +20,14 @@ export async function PUT(
     }
 
     const supabase = await createSupabaseServer();
-    
+
+    // Get target user details for logging
+    const { data: targetUser } = await supabase
+      .from('users')
+      .select('id, email, full_name, role')
+      .eq('id', userId)
+      .single();
+
     // Use the database function for role changes to handle approval logic
     if (body.role) {
       const { error } = await supabase.rpc('update_user_role', {
@@ -28,7 +35,7 @@ export async function PUT(
         p_new_role: body.role,
         p_admin_id: admin.id
       });
-      
+
       if (error) {
         throw error;
       }
@@ -39,8 +46,11 @@ export async function PUT(
         'user.role_changed',
         userId,
         {
+          old_role: targetUser?.role,
           new_role: body.role,
-          admin_id: admin.id
+          admin_id: admin.id,
+          user_name: admin.full_name || admin.email,
+          target_user_name: targetUser?.full_name || targetUser?.email
         }
       );
     }
@@ -67,7 +77,10 @@ export async function PUT(
           userId,
           {
             new_color_index: updateData.color_index,
-            admin_id: admin.id
+            new_color: `Color ${updateData.color_index}`,
+            admin_id: admin.id,
+            user_name: admin.full_name || admin.email,
+            target_user_name: targetUser?.full_name || targetUser?.email
           }
         );
       } else if (Object.keys(updateData).length > 0) {
@@ -77,7 +90,9 @@ export async function PUT(
           userId,
           {
             updated_fields: Object.keys(updateData),
-            admin_id: admin.id
+            admin_id: admin.id,
+            user_name: admin.full_name || admin.email,
+            target_user_name: targetUser?.full_name || targetUser?.email
           }
         );
       }
@@ -118,7 +133,14 @@ export async function DELETE(
     }
 
     const supabase = await createSupabaseServer();
-    
+
+    // Get user details before deletion for logging
+    const { data: userToDelete } = await supabase
+      .from('users')
+      .select('id, email, full_name')
+      .eq('id', userId)
+      .single();
+
     const { error } = await supabase
       .from('users')
       .delete()
@@ -134,7 +156,9 @@ export async function DELETE(
       'user.deleted',
       userId,
       {
-        admin_id: admin.id
+        admin_id: admin.id,
+        user_name: admin.full_name || admin.email,
+        target_user_name: userToDelete?.full_name || userToDelete?.email
       }
     );
 

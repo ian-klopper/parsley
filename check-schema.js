@@ -1,3 +1,4 @@
+require('dotenv').config({ path: '.env.local' });
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(
@@ -7,62 +8,64 @@ const supabase = createClient(
 
 async function checkSchema() {
   try {
-    // Check users table structure
-    console.log('=== USERS TABLE SCHEMA ===');
-    const { data: usersSchema, error: usersError } = await supabase
-      .rpc('exec_sql', {
-        query: `
-          SELECT column_name, data_type, is_nullable, column_default
-          FROM information_schema.columns
-          WHERE table_name = 'users' AND table_schema = 'public'
-          ORDER BY ordinal_position;
-        `
-      });
+    console.log('🔍 Checking database schema...\n');
 
-    if (usersError) {
-      console.error('Users schema error:', usersError);
+    // Check what tables exist
+    const { data: tables, error } = await supabase
+      .rpc('get_schema_tables');
+
+    if (error) {
+      console.log('Using alternative method to check tables...');
+
+      // Try to query information_schema directly
+      const { data: tableList, error: tableError } = await supabase
+        .from('information_schema.tables')
+        .select('table_name')
+        .eq('table_schema', 'public');
+
+      if (tableError) {
+        console.log('Checking tables by trying to query them individually...');
+
+        const tablesToCheck = [
+          'jobs',
+          'job_documents',
+          'extraction_results',
+          'extracted_items',
+          'menu_items',
+          'items_sizes',
+          'item_sizes',
+          'menu_item_sizes',
+          'item_modifiers'
+        ];
+
+        for (const table of tablesToCheck) {
+          try {
+            const { data, error } = await supabase
+              .from(table)
+              .select('*')
+              .limit(0);
+
+            if (error) {
+              console.log(`❌ Table '${table}' does not exist or is not accessible`);
+            } else {
+              console.log(`✅ Table '${table}' exists`);
+            }
+          } catch (e) {
+            console.log(`❌ Table '${table}' does not exist`);
+          }
+        }
+      } else {
+        console.log('📋 Available tables:');
+        tableList.forEach(table => {
+          console.log(`  - ${table.table_name}`);
+        });
+      }
     } else {
-      console.log(JSON.stringify(usersSchema, null, 2));
-    }
-
-    // Check jobs table structure
-    console.log('\n=== JOBS TABLE SCHEMA ===');
-    const { data: jobsSchema, error: jobsError } = await supabase
-      .rpc('exec_sql', {
-        query: `
-          SELECT column_name, data_type, is_nullable, column_default
-          FROM information_schema.columns
-          WHERE table_name = 'jobs' AND table_schema = 'public'
-          ORDER BY ordinal_position;
-        `
-      });
-
-    if (jobsError) {
-      console.error('Jobs schema error:', jobsError);
-    } else {
-      console.log(JSON.stringify(jobsSchema, null, 2));
-    }
-
-    // Check existing tables
-    console.log('\n=== ALL PUBLIC TABLES ===');
-    const { data: tables, error: tablesError } = await supabase
-      .rpc('exec_sql', {
-        query: `
-          SELECT table_name
-          FROM information_schema.tables
-          WHERE table_schema = 'public'
-          ORDER BY table_name;
-        `
-      });
-
-    if (tablesError) {
-      console.error('Tables error:', tablesError);
-    } else {
-      console.log(JSON.stringify(tables, null, 2));
+      console.log('📋 Schema tables:', tables);
     }
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('❌ Schema check failed:', error);
   }
 }
 

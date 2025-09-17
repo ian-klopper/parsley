@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requireAdmin, handleApiError, createSupabaseServer } from '@/lib/api/auth-middleware';
+import { ActivityLogger } from '@/lib/services/activity-logger';
 
 export async function GET(request: NextRequest) {
   try {
@@ -44,6 +45,41 @@ export async function GET(request: NextRequest) {
       }
     });
     
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const admin = await requireAdmin(request);
+
+    const supabase = await createSupabaseServer();
+
+    // Delete all activity logs
+    const { error } = await supabase
+      .from('activity_logs')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000'); // This will delete all records
+
+    if (error) {
+      throw error;
+    }
+
+    // Log this action
+    await ActivityLogger.log(
+      admin.id,
+      'admin.logs_cleared',
+      'success',
+      {
+        admin_id: admin.id,
+        user_name: admin.full_name || admin.email,
+        cleared_at: new Date().toISOString()
+      }
+    );
+
+    return Response.json({ message: 'All activity logs cleared successfully' });
+
   } catch (error) {
     return handleApiError(error);
   }

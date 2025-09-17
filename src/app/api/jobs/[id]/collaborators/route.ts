@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requireNonPending, handleApiError, createSupabaseServer } from '@/lib/api/auth-middleware';
+import { ActivityLogger } from '@/lib/services/activity-logger';
 
 export async function GET(
   request: NextRequest,
@@ -70,7 +71,7 @@ export async function POST(
     // Verify job exists and user has permission to manage collaborators
     const { data: job, error: jobError } = await supabase
       .from('jobs')
-      .select('id, created_by, owner_id, collaborators')
+      .select('id, created_by, owner_id, collaborators, venue, job_id')
       .eq('id', params.id)
       .single();
 
@@ -127,6 +128,20 @@ export async function POST(
       throw updateError;
     }
 
+    // Log the activity with user details
+    await ActivityLogger.logJobActivity(
+      user.id,
+      'job.collaborator_added',
+      params.id,
+      {
+        collaborator_id: collaboratorUser.id,
+        collaborator_name: collaboratorUser.full_name || collaboratorUser.email,
+        added_by_name: user.full_name || user.email,
+        job_venue: job.venue,
+        job_number: job.job_id
+      }
+    );
+
     return Response.json({
       data: {
         job_id: params.id,
@@ -163,7 +178,7 @@ export async function DELETE(
     // Verify job exists and user has permission to manage collaborators
     const { data: job, error: jobError } = await supabase
       .from('jobs')
-      .select('id, created_by, owner_id, collaborators')
+      .select('id, created_by, owner_id, collaborators, venue, job_id')
       .eq('id', params.id)
       .single();
 
@@ -179,25 +194,53 @@ export async function DELETE(
       return Response.json({ error: 'Permission denied' }, { status: 403 });
     }
 
+    // Prevent owner from removing themselves as collaborator
+    if (collaboratorId === job.owner_id) {
+      return Response.json({ error: 'Cannot remove the owner from collaborators' }, { status: 400 });
+    }
+
     // Check if the collaborator is actually in the list
     if (!job.collaborators || !job.collaborators.includes(collaboratorId)) {
       return Response.json({ error: 'User is not a collaborator' }, { status: 400 });
     }
 
-    // Remove collaborator from the job
-    const newCollaborators = job.collaborators.filter(id => id !== collaboratorId);
+    // Get collaborator details for logging
+    const { data: removedUser } = await supabase
+      .from('users')
+      .select('id, email, full_name')
+      .eq('id', collaboratorId)
+      .single();
 
-    const { error: updateError } = await supabase
+    // Remove collaborator from the job
+    const newCollaborators = job.collaborators.filter((id: string) => id !== collaboratorId);
+
+    const { data: updatedJob, error: updateError } = await supabase
       .from('jobs')
       .update({
         collaborators: newCollaborators,
         last_activity: new Date().toISOString()
       })
-      .eq('id', params.id);
+      .eq('id', params.id)
+      .select('id, venue, job_id')
+      .single();
 
     if (updateError) {
       throw updateError;
     }
+
+    // Log the activity with user details
+    await ActivityLogger.logJobActivity(
+      user.id,
+      'job.collaborator_removed',
+      params.id,
+      {
+        collaborator_id: collaboratorId,
+        collaborator_name: removedUser?.full_name || removedUser?.email || 'Unknown',
+        removed_by_name: user.full_name || user.email,
+        job_venue: updatedJob.venue,
+        job_number: updatedJob.job_id
+      }
+    );
 
     return Response.json({
       data: {

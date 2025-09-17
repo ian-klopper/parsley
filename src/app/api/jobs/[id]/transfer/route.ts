@@ -20,7 +20,7 @@ export async function POST(
     // Get the existing job to check permissions
     const { data: existingJob, error: getError } = await supabase
       .from('jobs')
-      .select('created_by, owner_id')
+      .select('created_by, owner_id, venue, job_id, owner:owner_id(id, email, full_name)')
       .eq('id', jobId)
       .single();
 
@@ -39,7 +39,7 @@ export async function POST(
     // Find the new owner by email
     const { data: newOwner, error: userError } = await supabase
       .from('users')
-      .select('id')
+      .select('id, email, full_name')
       .eq('email', newOwnerEmail)
       .single();
 
@@ -66,15 +66,23 @@ export async function POST(
       throw updateError;
     }
 
-    // Log ownership transfer
+    // Log ownership transfer with comprehensive details
     await ActivityLogger.logJobActivity(
       user.id,
       'job.ownership_transferred',
       jobId,
       {
         previous_owner_id: existingJob.owner_id,
+        previous_owner_name: existingJob.owner?.full_name || existingJob.owner?.email || 'Unknown Previous Owner',
+        previous_owner_email: existingJob.owner?.email,
         new_owner_id: newOwner.id,
-        new_owner_email: newOwnerEmail
+        new_owner_name: newOwner.full_name || newOwner.email,
+        new_owner_email: newOwnerEmail,
+        user_name: user.full_name || user.email,
+        job_venue: existingJob.venue,
+        job_number: existingJob.job_id,
+        transfered_by: user.full_name || user.email,
+        transfer_timestamp: new Date().toISOString()
       }
     );
 

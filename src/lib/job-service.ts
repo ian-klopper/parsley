@@ -150,4 +150,30 @@ export class JobService {
     const result = await this.getJobs();
     return { jobs: result.data, error: result.error };
   }
+
+  /**
+   * Get extraction results for a job
+   */
+  static async getExtractionResults(jobId: string): Promise<{ data: any | null; error: string | null }> {
+    try {
+      const result = await apiClient.getJobExtractionResults(jobId);
+      return { data: result, error: null };
+    } catch (error) {
+      console.error('Error fetching extraction results:', error);
+      return { data: null, error: error instanceof Error ? error.message : 'Failed to fetch extraction results' };
+    }
+  }
+
+  /**
+   * Start extraction for a job
+   */
+  static async startExtraction(jobId: string): Promise<{ data: any | null; error: string | null }> {
+    try {
+      const result = await apiClient.startJobExtraction(jobId);
+      return { data: result, error: null };
+    } catch (error) {
+      console.error('Error starting extraction:', error);
+      return { data: null, error: error instanceof Error ? error.message : 'Failed to start extraction' };
+    }
+  }
 }

@@ -34,7 +34,8 @@ export function useJob(id: string) {
       return result.data;
     },
     enabled: !!id,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 1000 * 60, // 1 minute for faster job status updates
+    refetchInterval: 5000, // Refetch every 5 seconds to track job status changes
   });
 }
 
@@ -58,23 +59,8 @@ export function useCreateJob() {
       // Snapshot previous value
       const previousJobs = queryClient.getQueryData<Job[]>([JOBS_QUERY_KEY]);
 
-      // Optimistically update to the new value
-      if (previousJobs) {
-        const optimisticJob: Job = {
-          id: 'temp-' + Date.now(),
-          venue: newJobData.venue,
-          job_id: newJobData.job_id,
-          status: newJobData.status || 'draft',
-          created_by: 'temp-user',
-          owner_id: 'temp-user',
-          collaborators: newJobData.collaborators || [],
-          last_activity: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-
-        queryClient.setQueryData<Job[]>([JOBS_QUERY_KEY], [optimisticJob, ...previousJobs]);
-      }
+      // Don't show optimistic job with temp ID - wait for real creation
+      // This prevents users from clicking on temporary jobs before they're properly created
 
       // Return context object with snapshot value
       return { previousJobs };
@@ -243,5 +229,57 @@ export function useTransferOwnership() {
         variant: "destructive",
       });
     },
+  });
+}
+
+// Get extraction results for a job
+export function useJobExtractionResults(jobId: string) {
+  return useQuery({
+    queryKey: [JOBS_QUERY_KEY, jobId, 'extraction'],
+    queryFn: async () => {
+      const result = await JobService.getExtractionResults(jobId);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+    enabled: !!jobId,
+    staleTime: 1000 * 30, // 30 seconds for faster updates
+    refetchInterval: 2000, // Refetch every 2 seconds for real-time extraction progress
+  });
+}
+
+// Start extraction for a job
+export function useStartExtraction() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (jobId: string) => {
+      const result = await JobService.startExtraction(jobId);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+    onSuccess: (data, jobId) => {
+      // Invalidate job and extraction queries
+      queryClient.invalidateQueries({ queryKey: [JOBS_QUERY_KEY, jobId] });
+      queryClient.invalidateQueries({ queryKey: [JOBS_QUERY_KEY, jobId, 'extraction'] });
+      const count = data?.data?.itemCount ?? 0;
+      toast({
+        title: "Extraction Complete",
+        description: count > 0
+          ? `Successfully extracted ${count} item${count === 1 ? '' : 's'}.`
+          : 'Extraction finished but no items were found. Consider retrying or checking your documents.',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Extraction Failed",
+        description: error.message,
+        variant: "destructive"
+      });
+    }
   });
 }

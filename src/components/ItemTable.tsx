@@ -64,12 +64,12 @@ export const ItemTable = ({ items: initialItems, onItemsChange }: { items: FoodI
             <Table>
               <TableHeader>
                 <TableRow className="border-b-0">
-                  <TableHead className="w-[16%]">Item(s)</TableHead>
-                  <TableHead className="w-[12%]">Category</TableHead>
-                  <TableHead className="w-[16%]">Menu(s)</TableHead>
-                  <TableHead className="w-[16%]">Size(s)</TableHead>
-                  <TableHead className="w-[16%]">Modifier(s)</TableHead>
-                  <TableHead className="w-[24%]"></TableHead>
+                  <TableHead>Item(s)</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Menu(s)</TableHead>
+                  <TableHead>Size(s)</TableHead>
+                  <TableHead>Modifier(s)</TableHead>
+                  <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
             </Table>

@@ -52,10 +52,6 @@ export function UserNavigation() {
             <span>Dashboard</span>
           </DropdownMenuItem>
 
-          <DropdownMenuItem onClick={() => router.push('/job')}>
-            <Briefcase className="mr-2 h-4 w-4" />
-            <span>Jobs</span>
-          </DropdownMenuItem>
 
           {userProfile?.role === 'admin' && (
             <DropdownMenuItem onClick={() => router.push('/admin')}>

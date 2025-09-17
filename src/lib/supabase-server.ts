@@ -19,11 +19,22 @@ export function createClient(cookieStore: ReturnType<typeof cookies>) {
     {
       cookies: {
         get(name: string) {
-          return cookieStore.get(name)?.value
+          const anyStore: any = cookieStore as any
+          const raw = anyStore?.get?.(name)?.value as string | undefined
+          if (!raw) return undefined
+          if (raw.length > 1 && raw.startsWith('"') && raw.endsWith('"')) {
+            try {
+              return raw.slice(1, -1)
+            } catch {
+              return raw
+            }
+          }
+          return raw
         },
         set(name: string, value: string, options: CookieOptions) {
           try {
-            cookieStore.set({ name, value, ...options })
+            const anyStore: any = cookieStore as any
+            anyStore?.set?.({ name, value, ...options })
           } catch (error) {
             // The `set` method was called from a Server Component.
             // This can be ignored if you have middleware refreshing
@@ -32,7 +43,8 @@ export function createClient(cookieStore: ReturnType<typeof cookies>) {
         },
         remove(name: string, options: CookieOptions) {
           try {
-            cookieStore.set({ name, value: '', ...options })
+            const anyStore: any = cookieStore as any
+            anyStore?.set?.({ name, value: '', ...options })
           } catch (error) {
             // The `delete` method was called from a Server Component.
             // This can be ignored if you have middleware refreshing

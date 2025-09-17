@@ -155,4 +155,15 @@ export class UserService {
       return { data: null, error: error instanceof Error ? error.message : 'Failed to fetch activity logs' };
     }
   }
+
+  // Admin: Clear all activity logs
+  static async clearActivityLogs(): Promise<{ error: string | null }> {
+    try {
+      await apiClient.clearActivityLogs();
+      return { error: null };
+    } catch (error) {
+      console.error('Error clearing activity logs:', error);
+      return { error: error instanceof Error ? error.message : 'Failed to clear activity logs' };
+    }
+  }
 }

@@ -137,6 +137,23 @@ class ApiClient {
   async getActivityLogs(page = 1, limit = 50) {
     return this.request<{ data: any[]; pagination: any }>(`/admin/logs?page=${page}&limit=${limit}`);
   }
+
+  async clearActivityLogs() {
+    return this.request<{ message: string }>('/admin/logs', {
+      method: 'DELETE'
+    });
+  }
+
+  // Extraction endpoints
+  async getJobExtractionResults(jobId: string) {
+    return this.request<{ success: boolean; data: any }>(`/jobs/${jobId}/extract`);
+  }
+
+  async startJobExtraction(jobId: string) {
+    return this.request<{ success: boolean; data: any }>(`/jobs/${jobId}/extract`, {
+      method: 'POST'
+    });
+  }
 }
 
 export const apiClient = new ApiClient();

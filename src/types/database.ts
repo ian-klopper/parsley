@@ -137,6 +137,7 @@ export interface Database {
           action: string;
           details: Record<string, unknown>;
           status: 'success' | 'failure' | 'pending';
+          description: string | null;
           created_at: string;
         };
         Insert: {
@@ -145,6 +146,7 @@ export interface Database {
           action: string;
           details?: Record<string, unknown>;
           status?: 'success' | 'failure' | 'pending';
+          description?: string | null;
           created_at?: string;
         };
         Update: {
@@ -153,6 +155,138 @@ export interface Database {
           action?: string;
           details?: Record<string, unknown>;
           status?: 'success' | 'failure' | 'pending';
+          description?: string | null;
+          created_at?: string;
+        };
+      };
+      extraction_results: {
+        Row: {
+          id: string;
+          job_id: string;
+          extraction_status: 'pending' | 'processing' | 'completed' | 'failed';
+          error_message: string | null;
+          extracted_by: string | null;
+          item_count: number;
+          extraction_cost: number;
+          api_calls_count: number;
+          processing_time_ms: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          job_id: string;
+          extraction_status?: 'pending' | 'processing' | 'completed' | 'failed';
+          error_message?: string | null;
+          extracted_by?: string | null;
+          item_count?: number;
+          extraction_cost?: number;
+          api_calls_count?: number;
+          processing_time_ms?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          job_id?: string;
+          extraction_status?: 'pending' | 'processing' | 'completed' | 'failed';
+          error_message?: string | null;
+          extracted_by?: string | null;
+          item_count?: number;
+          extraction_cost?: number;
+          api_calls_count?: number;
+          processing_time_ms?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      menu_items: {
+        Row: {
+          id: string;
+          job_id: string;
+          extraction_id: string | null;
+          name: string;
+          description: string;
+          subcategory: string;
+          menus: string;
+          created_at: string;
+          updated_at: string;
+          created_by: string | null;
+          version: number;
+        };
+        Insert: {
+          id?: string;
+          job_id: string;
+          extraction_id?: string | null;
+          name: string;
+          description?: string;
+          subcategory: string;
+          menus?: string;
+          created_at?: string;
+          updated_at?: string;
+          created_by?: string | null;
+          version?: number;
+        };
+        Update: {
+          id?: string;
+          job_id?: string;
+          extraction_id?: string | null;
+          name?: string;
+          description?: string;
+          subcategory?: string;
+          menus?: string;
+          created_at?: string;
+          updated_at?: string;
+          created_by?: string | null;
+          version?: number;
+        };
+      };
+      item_sizes: {
+        Row: {
+          id: string;
+          item_id: string;
+          size: string;
+          price: number;
+          active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          item_id: string;
+          size?: string;
+          price?: number;
+          active?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          item_id?: string;
+          size?: string;
+          price?: number;
+          active?: boolean;
+          created_at?: string;
+        };
+      };
+      item_modifiers: {
+        Row: {
+          id: string;
+          item_id: string;
+          modifier_group: string;
+          options: Record<string, unknown>[];
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          item_id: string;
+          modifier_group: string;
+          options?: Record<string, unknown>[];
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          item_id?: string;
+          modifier_group?: string;
+          options?: Record<string, unknown>[];
           created_at?: string;
         };
       };
@@ -177,6 +311,22 @@ export type JobDocumentUpdate = Database['public']['Tables']['job_documents']['U
 
 export type ActivityLog = Database['public']['Tables']['activity_logs']['Row'];
 export type ActivityLogInsert = Database['public']['Tables']['activity_logs']['Insert'];
+
+export type ExtractionResult = Database['public']['Tables']['extraction_results']['Row'];
+export type ExtractionResultInsert = Database['public']['Tables']['extraction_results']['Insert'];
+export type ExtractionResultUpdate = Database['public']['Tables']['extraction_results']['Update'];
+
+export type MenuItem = Database['public']['Tables']['menu_items']['Row'];
+export type MenuItemInsert = Database['public']['Tables']['menu_items']['Insert'];
+export type MenuItemUpdate = Database['public']['Tables']['menu_items']['Update'];
+
+export type ItemSize = Database['public']['Tables']['item_sizes']['Row'];
+export type ItemSizeInsert = Database['public']['Tables']['item_sizes']['Insert'];
+export type ItemSizeUpdate = Database['public']['Tables']['item_sizes']['Update'];
+
+export type ItemModifier = Database['public']['Tables']['item_modifiers']['Row'];
+export type ItemModifierInsert = Database['public']['Tables']['item_modifiers']['Insert'];
+export type ItemModifierUpdate = Database['public']['Tables']['item_modifiers']['Update'];
 
 // Extended types for API responses
 export type JobWithDetails = Job & {
