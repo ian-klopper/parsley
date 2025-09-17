@@ -30,7 +30,7 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
                   error?.status === 401) {
                 return false;
               }
-              return failureCount < 2;
+              return false;
             },
           },
         },

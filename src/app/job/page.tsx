@@ -41,7 +41,7 @@ import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
 import { LoadingWithTips } from "@/components/LoadingWithTips";
 import { jobTips } from "@/lib/loading-tips";
-import { formatCost, getCostColor, estimateExtractionCost } from "@/lib/extraction-cost-calculator";
+import { formatCost, getCostColor, estimateExtractionCost } from "@/lib/extraction-cost-utils";
 
 // React Query hooks - instant updates!
 import { useJob, useUpdateJob, useDeleteJob, useTransferOwnership, useJobExtractionResults, useStartExtraction } from "@/hooks/queries/useJobs"
@@ -116,6 +116,7 @@ function JobPageContent() {
   const [transferOwnershipDialog, setTransferOwnershipDialog] = useState(false);
   const [newOwnerEmail, setNewOwnerEmail] = useState('');
   const [deleteDialog, setDeleteDialog] = useState(false);
+  const [latestExtractionData, setLatestExtractionData] = useState<any>(null);
 
   const tabs = allTabs;
 
@@ -295,6 +296,11 @@ function JobPageContent() {
 
     try {
       const result = await startExtractionMutation.mutateAsync(job.id);
+
+      // Store the latest extraction data with phase breakdown
+      if (result?.data) {
+        setLatestExtractionData(result.data);
+      }
 
       // Update organized data and items immediately from POST response for instant UI refresh
       const organized = result?.data?.organizedData;
@@ -621,29 +627,78 @@ function JobPageContent() {
                   {isExtractionComplete && (
                     <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
                       <div className="text-sm text-green-800">
-                        <div className="font-medium mb-1">✅ Extraction Complete</div>
+                        <div className="font-medium mb-1">✅ 3-Phase Extraction Complete</div>
                         <div className="text-xs text-green-600">
                           Extracted {extractionItemCount} menu items • Results displayed in table
                         </div>
-                        {/* Extraction Costs */}
+
+                        {/* NEW: 3-Phase Cost Breakdown */}
                         {extractionResults?.data?.extractions && extractionResults.data.extractions.length > 0 && (
                           <div className="mt-2 space-y-1">
-                            {extractionResults.data.extractions.map((extraction, index) => (
-                              <div key={extraction.id} className="text-xs text-green-600 flex justify-between items-center">
-                                <span>
-                                  <span className="font-medium">Extraction {index + 1}:</span>{' '}
-                                  {extraction.itemCount} items
-                                  {extraction.apiCallsCount && (
-                                    <span className="text-gray-500 ml-1">
-                                      ({extraction.apiCallsCount} API calls)
+                            {/* Show latest extraction with phase breakdown if available */}
+                            {(() => {
+                              const latestExtraction = extractionResults.data.extractions[0];
+                              const hasPhaseBreakdown = latestExtractionData?.costBreakdown;
+
+                              return (
+                                <div className="space-y-1">
+                                  <div className="text-xs text-green-600 flex justify-between items-center">
+                                    <span>
+                                      <span className="font-medium">Latest Extraction:</span>{' '}
+                                      {latestExtractionData?.itemCount || latestExtraction.itemCount} items
+                                      {(latestExtractionData?.apiCalls || latestExtraction.apiCallsCount) && (
+                                        <span className="text-gray-500 ml-1">
+                                          ({latestExtractionData?.apiCalls || latestExtraction.apiCallsCount} API calls)
+                                        </span>
+                                      )}
                                     </span>
-                                  )}
-                                </span>
-                                <span className={getCostColor(extraction.extractionCost || 0)}>
-                                  {formatCost(extraction.extractionCost || 0)}
-                                </span>
-                              </div>
-                            ))}
+                                    <span className={getCostColor(latestExtractionData?.totalCost || latestExtraction.extractionCost || 0)}>
+                                      {formatCost(latestExtractionData?.totalCost || latestExtraction.extractionCost || 0)}
+                                    </span>
+                                  </div>
+
+                                  {/* Phase breakdown with real costs */}
+                                  <div className="text-xs text-green-500 mt-1 pl-2 border-l-2 border-green-300">
+                                    {hasPhaseBreakdown ? (
+                                      <div className="space-y-0.5">
+                                        <div className="flex justify-between">
+                                          <span>• Phase 1: Structure Analysis (Gemini Pro)</span>
+                                          <span className="text-green-600 font-mono">
+                                            {formatCost(latestExtractionData.costBreakdown.phase1)}
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span>• Phase 2: Item Extraction (Flash Models)</span>
+                                          <span className="text-green-600 font-mono">
+                                            {formatCost(latestExtractionData.costBreakdown.phase2)}
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span>• Phase 3: Modifier Enrichment (Gemini Pro)</span>
+                                          <span className="text-green-600 font-mono">
+                                            {formatCost(latestExtractionData.costBreakdown.phase3)}
+                                          </span>
+                                        </div>
+                                        <div className="text-green-600 font-medium mt-1 pt-1 border-t border-green-300">
+                                          Real token costs tracked (no estimates)
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div>
+                                        <div>• Phase 1: Structure Analysis (Gemini Pro)</div>
+                                        <div>• Phase 2: Item Extraction (Flash Models)</div>
+                                        <div>• Phase 3: Modifier Enrichment (Gemini Pro)</div>
+                                        <div className="text-green-600 font-medium mt-1">
+                                          Real token costs tracked (no estimates)
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+
+                            {/* Multiple extractions total */}
                             {extractionResults.data.extractions.length > 1 && (
                               <div className="text-xs text-green-700 font-medium border-t pt-1 flex justify-between">
                                 <span>Total ({extractionResults.data.extractions.length} extractions):</span>

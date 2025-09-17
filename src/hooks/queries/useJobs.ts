@@ -322,6 +322,7 @@ export function useJobExtractionResults(jobId: string) {
     },
     enabled: !!jobId,
     staleTime: 1000 * 30, // 30 seconds
+    retry: false, // Disable retries for this query
   });
 }
 
