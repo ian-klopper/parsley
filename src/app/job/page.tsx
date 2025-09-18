@@ -99,9 +99,6 @@ function JobPageContent() {
   const { data: extractionResults, isLoading: extractionLoading } = useJobExtractionResults(jobId || '');
   const startExtractionMutation = useStartExtraction();
 
-  // Extraction progress hook - only poll when actually processing
-  const { data: progressData } = useExtractionProgress(jobId || '', isSimpleProcessing);
-
   // File upload hook
   const {
     documents,
@@ -143,6 +140,9 @@ function JobPageContent() {
   const [extractionPhase, setExtractionPhase] = useState('');
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [isSimpleProcessing, setIsSimpleProcessing] = useState(false);
+
+  // Extraction progress hook - only poll when actually processing
+  const { data: progressData } = useExtractionProgress(jobId || '', isSimpleProcessing);
 
   const tabs = allTabs;
 
