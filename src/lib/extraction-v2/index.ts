@@ -50,18 +50,27 @@ export async function extractMenu(documents: DocumentMeta[]): Promise<Extraction
   const startTime = Date.now();
   const tokenTracker = new RealTokenTracker();
 
-  // Initialize file manager and cache manager for cost optimization
-  const geminiApiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!geminiApiKey) {
-    throw new Error('GOOGLE_AI_API_KEY environment variable is required for file uploads');
-  }
-  initializeFileManager(geminiApiKey);
-  initializeCacheManager(geminiApiKey);
+  // Initialize file manager and cache manager for cost optimization - only when needed
+  let initialized = false;
+  const initializeOnDemand = () => {
+    if (initialized) return;
+    
+    const geminiApiKey = process.env.GOOGLE_AI_API_KEY;
+    if (!geminiApiKey) {
+      throw new Error('GOOGLE_AI_API_KEY environment variable is required for file uploads');
+    }
+    initializeFileManager(geminiApiKey);
+    initializeCacheManager(geminiApiKey);
+    initialized = true;
+  };
 
   // Clear previous logs and start fresh
   debugLogger.clearLogs();
 
   try {
+    // Initialize API clients when actually needed
+    initializeOnDemand();
+    
     // Pre-extraction setup
     const estimatedCost = estimateExtractionCost(documents);
     debugLogger.extractionStart(documents.length, estimatedCost);

@@ -15,23 +15,33 @@ import { parseSpreadsheetToMenuItems, isSpreadsheet, analyzeSpreadsheet } from '
 // Load environment variables
 dotenv.config({ path: '.env.local' });
 
-// Initialize API clients
-const apiKey = process.env.GOOGLE_AI_API_KEY;
-if (!apiKey) {
-  throw new Error('GOOGLE_AI_API_KEY environment variable is required');
-}
+// Initialize API clients lazily to avoid build-time errors
+let genAI: GoogleGenerativeAI | null = null;
+let fileManager: GoogleAIFileManager | null = null;
+let model: any = null;
 
-const genAI = new GoogleGenerativeAI(apiKey);
-const fileManager = new GoogleAIFileManager(apiKey);
-
-// Initialize Gemini Flash model with simple configuration (no structured output)
-const model = genAI.getGenerativeModel({
-  model: 'gemini-2.5-flash',
-  generationConfig: {
-    temperature: 0.1,
-    maxOutputTokens: 8000
+function initializeClients() {
+  if (genAI && fileManager && model) return { genAI, fileManager, model };
+  
+  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GOOGLE_AI_API_KEY environment variable is required');
   }
-});
+
+  genAI = new GoogleGenerativeAI(apiKey);
+  fileManager = new GoogleAIFileManager(apiKey);
+
+  // Initialize Gemini Flash model with simple configuration (no structured output)
+  model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 8000
+    }
+  });
+
+  return { genAI, fileManager, model };
+}
 
 // Types
 export interface SimpleMenuItem {
@@ -93,6 +103,8 @@ export interface ProcessingResult {
  */
 async function uploadDocument(filePath: string, documentId: string): Promise<UploadedFile> {
   console.log(`📤 Uploading: ${documentId}`);
+  
+  const { fileManager } = initializeClients();
 
   // Determine MIME type from file extension
   const extension = filePath.toLowerCase().split('.').pop();
@@ -939,6 +951,7 @@ export async function testDocumentContent(filePath: string): Promise<void> {
   console.log(`🧪 Testing document: ${filePath}`);
 
   const uploaded = await uploadDocument(filePath, 'test-doc');
+  const { genAI } = initializeClients();
 
   const testModel = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',

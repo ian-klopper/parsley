@@ -4,13 +4,26 @@ import { FoodItem } from '@/lib/food-data';
 import { JobDocument } from '@/lib/storage-service';
 import { allowedCategories, allowedSizes, tabCategories, allTabs } from '@/lib/menu-data';
 
-// Initialize Genkit with Google AI
-const ai = genkit({
-  plugins: [googleAI({
-    apiKey: process.env.GOOGLE_AI_API_KEY
-  })],
-  model: gemini15Flash,
-});
+// Lazy initialization of Genkit with Google AI
+let ai: any = null;
+
+function initializeGenkit() {
+  if (ai) return ai;
+  
+  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GOOGLE_AI_API_KEY environment variable is required');
+  }
+
+  ai = genkit({
+    plugins: [googleAI({
+      apiKey: apiKey
+    })],
+    model: gemini15Flash,
+  });
+  
+  return ai;
+}
 
 export interface ModifierOption {
   name: string;
@@ -159,7 +172,8 @@ Below are the contents of ${documentContents.length} restaurant menu document(s)
           textPrompt += '\n\nReturn only valid JSON with extracted menu items.';
 
           console.log('🚀 Calling Gemini text API (fallback mode)...');
-          response = await ai.generate({
+          const geminiAI = initializeGenkit();
+          response = await geminiAI.generate({
             prompt: textPrompt,
             config: {
               temperature: 0.1,
@@ -169,7 +183,8 @@ Below are the contents of ${documentContents.length} restaurant menu document(s)
         } else {
           // Text-only mode
           console.log('🚀 Calling Gemini text API...');
-          response = await ai.generate({
+          const geminiAI = initializeGenkit();
+          response = await geminiAI.generate({
             prompt: fullPrompt,
             config: {
               temperature: 0.1,
