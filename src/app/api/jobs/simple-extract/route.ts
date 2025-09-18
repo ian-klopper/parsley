@@ -134,26 +134,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Create progress update function
-    const updateJobProgress = async (progress: any) => {
-      try {
-        await serviceSupabase
-          .from('jobs')
-          .update({
-            extraction_progress: progress,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', jobId);
-        
-        console.log(`📊 Progress: ${progress.progress}% - ${progress.currentStep} (${progress.itemsExtracted} items)`);
-      } catch (error) {
-        console.error('Failed to update job progress:', error);
-      }
-    };
-
-    // Run simple extraction with progress tracking
+    // Run simple extraction (without progress tracking for now)
     console.log('🔍 Starting extraction...');
-    const extractionResults = await extractor.extractMenuSimple(tempFiles, documentIds, updateJobProgress);
+    const extractionResults = await extractor.extractMenuSimple(tempFiles, documentIds);
 
     // Save results to file
     const resultPath = `/tmp/extraction-${jobId}.json`;

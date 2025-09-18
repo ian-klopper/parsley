@@ -786,7 +786,7 @@ export async function extractMenuSimple(
   console.log('🚀 Starting Simple Menu Extraction Pipeline');
   console.log(`📁 Processing ${filePaths.length} documents`);
 
-  // Helper function to update progress
+  // Helper function to update progress (optional)
   const updateProgress = async (
     phase: ExtractionProgress['phase'],
     currentFile: string,
@@ -814,7 +814,9 @@ export async function extractMenuSimple(
     }
   };
 
-  await updateProgress('starting', '', 0, 0, 'Initializing extraction...', 0);
+  if (onProgress) {
+    await updateProgress('starting', '', 0, 0, 'Initializing extraction...', 0);
+  }
 
   // Generate document IDs if not provided - now with enhanced uniqueness
   const docIds = documentIds || filePaths.map((path, i) => generateUniqueDocumentId(path, i));
@@ -844,19 +846,23 @@ export async function extractMenuSimple(
 
   // Process spreadsheets directly (no upload needed)
   console.log('\n📊 Step 1: Processing spreadsheets directly...');
-  await updateProgress('processing', '', 0, 0, 'Processing spreadsheets...', 5);
+  if (onProgress) {
+    await updateProgress('processing', '', 0, 0, 'Processing spreadsheets...', 5);
+  }
   
   for (let i = 0; i < spreadsheetFiles.length; i++) {
     const { path, id } = spreadsheetFiles[i];
 
-    await updateProgress(
-      'processing',
-      path.split('/').pop() || path,
-      i,
-      cache.items.length,
-      `Processing spreadsheet ${i + 1}/${spreadsheetFiles.length}`,
-      5 + (i / spreadsheetFiles.length) * 15 // 5-20% for spreadsheets
-    );
+    if (onProgress) {
+      await updateProgress(
+        'processing',
+        path.split('/').pop() || path,
+        i,
+        cache.items.length,
+        `Processing spreadsheet ${i + 1}/${spreadsheetFiles.length}`,
+        5 + (i / spreadsheetFiles.length) * 15 // 5-20% for spreadsheets
+      );
+    }
 
     try {
       // Process spreadsheet with current cache context
@@ -912,7 +918,9 @@ export async function extractMenuSimple(
 
   // Upload and process regular files through Gemini
   console.log('\n📤 Step 2: Uploading regular documents to Files API...');
-  await updateProgress('uploading', '', spreadsheetFiles.length, cache.items.length, 'Uploading documents...', 20);
+  if (onProgress) {
+    await updateProgress('uploading', '', spreadsheetFiles.length, cache.items.length, 'Uploading documents...', 20);
+  }
   
   const uploadedFiles: UploadedFile[] = [];
 
@@ -920,14 +928,16 @@ export async function extractMenuSimple(
   for (let i = 0; i < regularFiles.length; i++) {
     const { path, id } = regularFiles[i];
     
-    await updateProgress(
-      'uploading',
-      path.split('/').pop() || path,
-      spreadsheetFiles.length + i,
-      cache.items.length,
-      `Uploading file ${i + 1}/${regularFiles.length}`,
-      20 + (i / regularFiles.length) * 30 // 20-50% for uploads
-    );
+    if (onProgress) {
+      await updateProgress(
+        'uploading',
+        path.split('/').pop() || path,
+        spreadsheetFiles.length + i,
+        cache.items.length,
+        `Uploading file ${i + 1}/${regularFiles.length}`,
+        20 + (i / regularFiles.length) * 30 // 20-50% for uploads
+      );
+    }
     
     try {
       const uploaded = await uploadDocument(path, id);
@@ -942,19 +952,23 @@ export async function extractMenuSimple(
 
   // Process regular documents one by one
   console.log('\n🔄 Step 3: Processing regular documents with progressive caching...');
-  await updateProgress('processing', '', spreadsheetFiles.length + uploadedFiles.length, cache.items.length, 'Processing documents with AI...', 50);
+  if (onProgress) {
+    await updateProgress('processing', '', spreadsheetFiles.length + uploadedFiles.length, cache.items.length, 'Processing documents with AI...', 50);
+  }
 
   for (let i = 0; i < uploadedFiles.length; i++) {
     const file = uploadedFiles[i];
 
-    await updateProgress(
-      'processing',
-      file.documentId,
-      spreadsheetFiles.length + i,
-      cache.items.length,
-      `Processing document ${i + 1}/${uploadedFiles.length}`,
-      50 + (i / uploadedFiles.length) * 40 // 50-90% for processing
-    );
+    if (onProgress) {
+      await updateProgress(
+        'processing',
+        file.documentId,
+        spreadsheetFiles.length + i,
+        cache.items.length,
+        `Processing document ${i + 1}/${uploadedFiles.length}`,
+        50 + (i / uploadedFiles.length) * 40 // 50-90% for processing
+      );
+    }
 
     // Process document with current cache context
     const result = await processDocument(file, cache, i + spreadsheetFiles.length);
@@ -1004,7 +1018,9 @@ export async function extractMenuSimple(
     });
 
   // Final progress update
-  await updateProgress('complete', '', filePaths.length, cache.items.length, 'Extraction completed!', 100);
+  if (onProgress) {
+    await updateProgress('complete', '', filePaths.length, cache.items.length, 'Extraction completed!', 100);
+  }
 
   return cache;
 }

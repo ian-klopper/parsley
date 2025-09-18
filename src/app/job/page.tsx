@@ -141,8 +141,8 @@ function JobPageContent() {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [isSimpleProcessing, setIsSimpleProcessing] = useState(false);
 
-  // Extraction progress hook - only poll when actually processing
-  const { data: progressData } = useExtractionProgress(jobId || '', isSimpleProcessing);
+  // Extraction progress hook - temporarily disabled due to database column missing
+  // const { data: progressData } = useExtractionProgress(jobId || '', isSimpleProcessing);
 
   const tabs = allTabs;
 
@@ -312,10 +312,10 @@ function JobPageContent() {
     }
   }, [isProcessing, jobId, job?.created_at, queryClient]);
 
-  // Monitor simple extraction progress completion
+  // Monitor simple extraction completion via extraction results instead of progress
   useEffect(() => {
-    if (progressData?.progress?.phase === 'complete' && isSimpleProcessing) {
-      console.log('✅ Simple extraction completed, resetting processing state');
+    if (isSimpleProcessing && extractionResults?.success && extractionResults?.data?.hasResults) {
+      console.log('✅ Simple extraction completed via results, resetting processing state');
       setTimeout(() => {
         setIsSimpleProcessing(false);
         // Invalidate queries to refresh job data
@@ -329,7 +329,7 @@ function JobPageContent() {
         });
       }, 1000); // Small delay to show completion state
     }
-  }, [progressData?.progress?.phase, isSimpleProcessing, jobId, queryClient]);
+  }, [extractionResults, isSimpleProcessing, jobId, queryClient]);
 
   if (!mounted || jobLoading || usersLoading) {
     return <LoadingWithTips />;
@@ -917,65 +917,35 @@ function JobPageContent() {
 
 
 
-                    {/* Enhanced Progress Display - Show during simple processing */}
-                    {isSimpleProcessing && progressData?.progress && (
+                    {/* Simple Progress Display - Show during simple processing */}
+                    {isSimpleProcessing && (
                       <div className="space-y-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                        {/* Main Progress Bar */}
+                        {/* Basic Progress Bar */}
                         <div className="space-y-2">
                           <div className="flex justify-between items-center">
                             <span className="text-sm font-medium text-blue-800">
-                              {progressData.progress.currentStep}
+                              Processing documents...
                             </span>
                             <span className="text-sm text-blue-600">
-                              {Math.round(progressData.progress.progress)}%
+                              In progress
                             </span>
                           </div>
-                          <Progress value={progressData.progress.progress} className="w-full h-3" />
-                        </div>
-
-                        {/* File Progress */}
-                        <div className="grid grid-cols-2 gap-4 text-xs">
-                          <div>
-                            <div className="text-blue-700 font-medium">Files Processed</div>
-                            <div className="text-blue-600">
-                              {progressData.progress.filesProcessed} / {progressData.progress.totalFiles}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-blue-700 font-medium">Items Extracted</div>
-                            <div className="text-blue-600">
-                              {progressData.progress.itemsExtracted}
-                            </div>
+                          <div className="w-full bg-blue-200 rounded-full h-3">
+                            <div className="bg-blue-600 h-3 rounded-full animate-pulse" style={{width: '60%'}}></div>
                           </div>
                         </div>
 
-                        {/* Current File */}
-                        {progressData.progress.currentFile && (
-                          <div className="text-xs">
-                            <div className="text-blue-700 font-medium">Current File</div>
-                            <div className="text-blue-600 truncate">
-                              {progressData.progress.currentFile}
-                            </div>
-                          </div>
-                        )}
+                        {/* Processing Message */}
+                        <div className="text-sm text-blue-700">
+                          Please wait while we extract menu items from your documents. This may take a few minutes.
+                        </div>
 
-                        {/* Phase Indicator */}
+                        {/* Activity Indicator */}
                         <div className="flex items-center space-x-2 text-xs">
-                          <div className={`w-2 h-2 rounded-full ${
-                            progressData.progress.phase === 'starting' ? 'bg-yellow-400 animate-pulse' :
-                            progressData.progress.phase === 'uploading' ? 'bg-orange-400 animate-pulse' :
-                            progressData.progress.phase === 'processing' ? 'bg-blue-400 animate-pulse' :
-                            progressData.progress.phase === 'finalizing' ? 'bg-green-400 animate-pulse' :
-                            'bg-gray-400'
-                          }`}></div>
-                          <span className="text-blue-700 capitalize">
-                            {progressData.progress.phase}
+                          <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>
+                          <span className="text-blue-700">
+                            Extracting menu items...
                           </span>
-                          {progressData.progress.estimatedTimeRemaining && (
-                            <span className="text-blue-500">
-                              • ~{Math.round(progressData.progress.estimatedTimeRemaining / 1000)}s remaining
-                            </span>
-                          )}
                         </div>
                       </div>
                     )}
