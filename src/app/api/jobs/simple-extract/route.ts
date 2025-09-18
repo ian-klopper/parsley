@@ -9,7 +9,7 @@ import * as extractor from '@/lib/extraction-v2/simple-extractor';
 function parseModifierOptions(options: string[]): Array<{name: string, price?: string}> {
   return options.map(option => {
     if (typeof option !== 'string') {
-      return typeof option === 'object' && option.name ? option : { name: String(option) };
+      return typeof option === 'object' && 'name' in option ? option as {name: string, price?: string} : { name: String(option) };
     }
 
     // Look for price patterns: "+$4", "(+$2.50)", "($3)", etc.
@@ -42,10 +42,14 @@ export async function POST(request: NextRequest) {
   let jobId: string | undefined;
 
   try {
+    console.log('🚀 Simple extract API called - parsing request...');
     const { jobId: extractedJobId, documents }: SimpleExtractionRequest = await request.json();
     jobId = extractedJobId;
 
+    console.log(`📝 Request parsed - JobId: ${jobId}, Documents: ${documents?.length || 0}`);
+
     if (!jobId || !documents || documents.length === 0) {
+      console.error('❌ Invalid request - missing jobId or documents');
       return NextResponse.json({
         error: 'Missing jobId or documents'
       }, { status: 400 });
@@ -53,7 +57,17 @@ export async function POST(request: NextRequest) {
 
     console.log(`🚀 Starting simple extraction for job ${jobId} with ${documents.length} documents`);
 
+    // Environment check
+    console.log('🔍 Environment check:', {
+      nodeEnv: process.env.NODE_ENV,
+      hasGoogleAI: !!process.env.GOOGLE_AI_API_KEY,
+      hasSupabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      platform: process.platform
+    });
+
     // Get Supabase client (regular client for storage, service client for database writes)
+    console.log('🔗 Creating Supabase clients...');
     const cookieStore = await cookies();
     const supabase = createClient(cookieStore);
     
@@ -63,8 +77,10 @@ export async function POST(request: NextRequest) {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
+    console.log('✅ Supabase clients created');
 
     // Update job status to processing
+    console.log('📝 Updating job status to processing...');
     await serviceSupabase
       .from('jobs')
       .update({
@@ -72,6 +88,7 @@ export async function POST(request: NextRequest) {
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
+    console.log('✅ Job status updated');
 
     // Download documents from URLs to temporary files
     console.log('📥 Downloading documents...');
