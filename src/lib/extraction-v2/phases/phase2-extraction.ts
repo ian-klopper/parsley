@@ -43,30 +43,89 @@ function createExtractionBatches(
 
     if (doc.type === 'pdf' && doc.pages) {
       // Process specific pages or all pages
-      const targetPages = location.pageNumbers || doc.pages.map(p => p.pageNumber);
+      const targetPages = location.pageNumbers || doc.pages.filter(p => p.pageNumber > 0).map(p => p.pageNumber);
+      
+      // Track if we've already processed this page to avoid duplicates
+      const processedPages = new Set<number>();
+      
+      // First try text-based pages if available
+      const textPages = doc.pages.filter(p => !p.isImage && p.hasContent && targetPages.includes(p.pageNumber));
+      
+      for (const page of textPages) {
+        if (processedPages.has(page.pageNumber)) continue;
+        processedPages.add(page.pageNumber);
 
-      for (const pageNum of targetPages) {
-        const page = doc.pages.find(p => p.pageNumber === pageNum);
-        if (!page || !page.hasContent) continue;
+        // Debug: Check page content before batch creation
+        console.log(`🔍 DEBUG: Page content before batch creation:`);
+        console.log(`  Page ${page.pageNumber} content length: ${page.content?.length}`);
+        console.log(`  Page content preview: ${JSON.stringify(page.content?.substring(0, 100))}`);
+        console.log(`  Full page content: ${JSON.stringify(page.content)}`);
 
-        // Determine model based on content size and type
-        const model = page.isImage ? 'flashLite' : // Images use Flash-Lite
-                     page.tokens > 4000 ? 'flashLite' : // Large content uses Flash-Lite
-                     'flash'; // Standard content uses Flash
+        // Clean and format the content for better AI parsing
+        const cleanContent = page.content
+          .split('\n')
+          .filter(line => line.trim().length > 0)
+          .join('\n')
+          .trim();
+
+        console.log(`🔍 DEBUG: Cleaned content:`, JSON.stringify(cleanContent));
+
+        // Determine model based on content size
+        const model = page.tokens > 4000 ? 'flashLite' : 'flash';
+
+        batches.push({
+          id: `batch_${++batchIndex}`,
+          phase: 2,
+          section,
+          content: cleanContent,
+          isImage: false,
+          tokens: page.tokens,
+          model,
+          sourceRefs: [{
+            documentId: doc.id,
+            pageNumbers: [page.pageNumber]
+          }]
+        });
+      }
+      
+      // If we have no successful text pages or explicit image-only pages, use image fallbacks
+      const remainingPages = targetPages.filter(pageNum => !processedPages.has(pageNum));
+      const imagePages = doc.pages.filter(p => p.isImage && p.hasContent && 
+        (remainingPages.includes(p.pageNumber) || p.isFallback));
+      
+      for (const page of imagePages) {
+        if (page.isFallback && processedPages.has(page.pageNumber)) continue; // Skip fallbacks for already processed pages
+        
+        const pageNum = page.pageNumber === 0 && page.isFallback ? 
+          1 : page.pageNumber; // Use page 1 for fallback images
+          
+        if (processedPages.has(pageNum)) continue;
+        processedPages.add(pageNum);
 
         batches.push({
           id: `batch_${++batchIndex}`,
           phase: 2,
           section,
           content: page.content,
-          isImage: page.isImage,
+          isImage: true,
+          contentType: 'application/pdf', // Image-based PDF pages
           tokens: page.tokens,
-          model,
+          model: 'flashLite', // Always use Flash-Lite for images
           sourceRefs: [{
             documentId: doc.id,
             pageNumbers: [pageNum]
           }]
         });
+      }
+      
+      // Log diagnostic info for this section
+      const batchCount = batches.length - batchIndex + processedPages.size;
+      if (batchCount === 0) {
+        debugLogger.warn(2, 'NO_PDF_BATCHES',
+          `Could not create any batches for section "${section.name}" from PDF "${doc.name}"`);
+      } else {
+        debugLogger.debug(2, 'PDF_PROCESSING',
+          `Created ${batchCount} batches for section "${section.name}" from PDF "${doc.name}"`);
       }
 
     } else if (doc.type === 'spreadsheet' && doc.sheets) {
@@ -134,6 +193,7 @@ function createExtractionBatches(
         section,
         content: doc.content,
         isImage: true,
+        contentType: 'image/jpeg', // JPEG images
         tokens: estimateImageTokens(),
         model: 'flashLite', // Images always use Flash-Lite
         sourceRefs: [{
@@ -260,6 +320,17 @@ async function processExtractionBatch(
   debugLogger.batchStart(2, callIndex, 0, batch.tokens, batch.model);
 
   try {
+    // Debug: Log what Phase 2 AI will actually see
+    console.log(`🔍 PHASE 2 BATCH ${batch.id} CONTENT DEBUG:`);
+    if (batch.isImage) {
+      console.log(`  ${batch.contentType || 'image'} batch for section "${batch.section.name}" (${batch.content?.length || 0} bytes base64)`);
+    } else {
+      console.log(`  Text batch for section "${batch.section.name}":`);
+      const contentPreview = batch.content.substring(0, 300);
+      console.log(`  Content preview: ${contentPreview}${batch.content.length > 300 ? '...' : ''}`);
+      console.log(`  Total content length: ${batch.content.length} characters`);
+    }
+
     // Create prompt
     const prompt = createExtractionPrompt(batch, allSections);
 
@@ -274,12 +345,12 @@ async function processExtractionBatch(
         parts: batch.isImage ? [
           {
             inlineData: {
-              mimeType: 'image/jpeg',
+              mimeType: batch.contentType || 'image/jpeg', // Use correct MIME type for content
               data: batch.content
             }
           },
           { text: prompt }
-        ] : [{ text: prompt }]
+        ] : [{ text: prompt + '\n\nContent to extract from:\n' + batch.content }]
       }],
       generationConfig: {
         temperature: 0.1,

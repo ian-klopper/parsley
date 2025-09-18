@@ -20,10 +20,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import Link from "next/link"
-import { getHashColor, getUserColor, getStatusStyle, getStatusVariant } from "@/lib/theme-utils"
 import { useAuth } from "@/contexts/AuthContext"
 import { BackButton } from "@/components/BackButton"
 import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
+import { getStatusVariant, getUserColor } from "@/lib/theme-utils"
 import {
   Dialog,
   DialogContent,
@@ -40,8 +41,8 @@ import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
 import { LoadingWithTips } from "@/components/LoadingWithTips";
-import { jobTips } from "@/lib/loading-tips";
 import { formatCost, getCostColor, estimateExtractionCost } from "@/lib/extraction-cost-utils";
+import { useQueryClient } from "@tanstack/react-query";
 
 // React Query hooks - instant updates!
 import { useJob, useUpdateJob, useDeleteJob, useTransferOwnership, useJobExtractionResults, useStartExtraction } from "@/hooks/queries/useJobs"
@@ -77,6 +78,7 @@ function JobPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const jobId = searchParams.get('id');
 
   // React Query hooks with caching and optimistic updates
@@ -117,6 +119,12 @@ function JobPageContent() {
   const [newOwnerEmail, setNewOwnerEmail] = useState('');
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [latestExtractionData, setLatestExtractionData] = useState<any>(null);
+
+  // Progress tracking state
+  const [extractionProgress, setExtractionProgress] = useState(0);
+  const [extractionStatus, setExtractionStatus] = useState('');
+  const [extractionPhase, setExtractionPhase] = useState('');
+  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
 
   const tabs = allTabs;
 
@@ -165,19 +173,129 @@ function JobPageContent() {
     (extractionResults?.data?.items?.length) ||
     0;
 
-  // Update organized data and items when extraction results load
+  // Update organized data and items when extraction results load - enhanced for real-time updates
   useEffect(() => {
+    console.log('🔄 Extraction results updated:', extractionResults?.success, extractionResults?.data?.hasResults);
+
     if (extractionResults?.success && extractionResults?.data) {
       const organized = extractionResults.data.organizedData;
       const items = extractionResults.data.items || [];
 
-      setOrganizedData(organized);
+      console.log('📊 Setting organized data with', Object.keys(organized || {}).length, 'tabs and', items.length, 'items');
+
+      setOrganizedData(organized || {});
       setItems(items);
+
+      // If extraction just completed, reset processing state
+      if (extractionResults.data.hasResults && isProcessing) {
+        console.log('✅ Extraction completed, resetting processing state');
+        setIsProcessing(false);
+        setExtractionStarted(false);
+      }
     }
-  }, [extractionResults]);
+  }, [extractionResults, isProcessing]);
+
+  // Polling logic for extraction progress
+  useEffect(() => {
+    if (isProcessing && jobId) {
+      console.log('🔄 Starting extraction polling...');
+
+      // Start polling immediately
+      const pollStatus = async () => {
+        try {
+          // Invalidate and refetch job data
+          await queryClient.invalidateQueries({
+            queryKey: ['job', jobId],
+            exact: true
+          });
+
+          // Check if job status has changed
+          const updatedJob = queryClient.getQueryData(['job', jobId]);
+          if (updatedJob && (updatedJob as any).status === 'complete') {
+            console.log('✅ Job completed, stopping polling');
+            setIsProcessing(false);
+            setExtractionStarted(false);
+            setExtractionProgress(100);
+            setExtractionStatus('Extraction completed successfully!');
+            setExtractionPhase('');
+
+            // Stop polling
+            if (pollingInterval) {
+              clearInterval(pollingInterval);
+              setPollingInterval(null);
+            }
+            return;
+          }
+
+          // Update progress based on time elapsed (since we don't have real-time phase data)
+          const elapsed = Date.now() - (job?.created_at ? new Date(job.created_at).getTime() : Date.now());
+          const estimatedProgress = Math.min(95, Math.floor((elapsed / 30000) * 100)); // Estimate 30 seconds total
+
+          // Only update progress if it has actually changed to avoid unnecessary re-renders
+          setExtractionProgress(prev => {
+            if (prev !== estimatedProgress) {
+              return estimatedProgress;
+            }
+            return prev;
+          });
+
+          // Update status messages based on progress
+          let newStatus = '';
+          let newPhase = '';
+
+          if (estimatedProgress < 20) {
+            newStatus = 'Preparing documents...';
+            newPhase = 'Phase 0: Document Preparation';
+          } else if (estimatedProgress < 50) {
+            newStatus = 'Analyzing menu structure...';
+            newPhase = 'Phase 1: Structure Analysis';
+          } else if (estimatedProgress < 80) {
+            newStatus = 'Extracting menu items...';
+            newPhase = 'Phase 2: Item Extraction';
+          } else {
+            newStatus = 'Enriching with modifiers...';
+            newPhase = 'Phase 3: Modifier Enrichment';
+          }
+
+          // Only update status if it has changed
+          setExtractionStatus(prev => prev !== newStatus ? newStatus : prev);
+          setExtractionPhase(prev => prev !== newPhase ? newPhase : prev);
+
+        } catch (error) {
+          console.error('Polling error:', error);
+        }
+      };
+
+      // Poll immediately
+      pollStatus();
+
+      // Set up interval polling every 2 seconds
+      const interval = setInterval(pollStatus, 2000);
+      setPollingInterval(interval);
+
+      // Cleanup function
+      return () => {
+        if (interval) {
+          clearInterval(interval);
+          setPollingInterval(null);
+        }
+      };
+    } else {
+      // Reset progress when not processing
+      setExtractionProgress(0);
+      setExtractionStatus('');
+      setExtractionPhase('');
+
+      // Clear any existing polling
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        setPollingInterval(null);
+      }
+    }
+  }, [isProcessing, jobId, job?.created_at, queryClient]);
 
   if (!mounted || jobLoading || usersLoading) {
-    return <LoadingWithTips tips={jobTips} />;
+    return <LoadingWithTips />;
   }
 
   if (jobError || !job) {
@@ -305,6 +423,7 @@ function JobPageContent() {
       // Update organized data and items immediately from POST response for instant UI refresh
       const organized = result?.data?.organizedData;
       if (organized && typeof organized === 'object') {
+        console.log('📊 Extraction completed: setting organized data with', Object.keys(organized).length, 'tabs');
         setOrganizedData(organized);
         const allItems: FoodItem[] = [];
         Object.entries(organized).forEach(([tabName, tabData]) => {
@@ -315,8 +434,16 @@ function JobPageContent() {
         setItems(allItems);
       } else if (result?.data?.items && Array.isArray(result.data.items)) {
         // Fallback: if only items returned
+        console.log('📊 Extraction completed: setting', result.data.items.length, 'items');
         setItems(result.data.items);
       }
+
+      // Force query invalidation to ensure real-time updates
+      console.log('🔄 Forcing query invalidation after extraction completion');
+      queryClient.invalidateQueries({
+        queryKey: ['jobs', jobId, 'extraction'],
+        exact: true
+      });
     } catch (error) {
       // Error is already handled by the mutation's onError
       console.error('Extraction error:', error);
@@ -519,7 +646,7 @@ function JobPageContent() {
 
           <ResizablePanel defaultSize={25} minSize={20} className="h-full">
             <div className="h-full flex flex-col border-l">
-              <ScrollArea className="flex-1">
+              <ScrollArea key={`scroll-${jobId}-${isProcessing}`} className="flex-1">
                 <div className="p-4 space-y-4">
                   {/* User Navigation */}
                   <div className="flex justify-end">
@@ -583,37 +710,63 @@ function JobPageContent() {
                     )}
                   </div>
 
-                  {/* Extraction Button */}
-                  <button
-                    onClick={handleStartExtraction}
-                    disabled={!documents || documents.length === 0 || isProcessing}
-                    className={`w-full py-3 px-4 rounded-lg font-medium transition-all ${
-                      !documents || documents.length === 0 || isProcessing
-                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                        : isExtractionComplete
-                        ? 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'
-                        : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm hover:shadow-md'
-                    }`}
-                  >
-                    {isProcessing ? (
-                      <div className="flex items-center justify-center gap-2">
-                        <div className="w-4 h-4 border-2 border-gray-300 border-t-white rounded-full animate-spin"></div>
-                        Processing...
-                      </div>
-                    ) : isExtractionComplete ? (
-                      <div className="flex items-center justify-center gap-2">
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M4 4h12v2H4zM4 9h12v2H4zM4 14h12v2H4z" />
-                        </svg>
-                        Retry Extraction ({extractionItemCount} items found)
-                      </div>
-                    ) : (
-                      'Start Extraction'
-                    )}
-                  </button>
+                  {/* Extraction Section */}
+                  <div className="space-y-3">
+                    {/* Extraction Button */}
+                    <button
+                      onClick={handleStartExtraction}
+                      disabled={!documents || documents.length === 0 || isProcessing}
+                      className={`w-full py-3 px-4 rounded-lg font-medium transition-all relative overflow-hidden ${
+                        !documents || documents.length === 0 || isProcessing
+                          ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                          : isExtractionComplete
+                          ? 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'
+                          : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm hover:shadow-md'
+                      }`}
+                    >
+                      {isProcessing ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-4 h-4 border-2 border-gray-300 border-t-white rounded-full animate-spin"></div>
+                          <span>Processing...</span>
+                        </div>
+                      ) : isExtractionComplete ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M4 4h12v2H4zM4 9h12v2H4zM4 14h12v2H4z" />
+                          </svg>
+                          Retry Extraction ({extractionItemCount} items found)
+                        </div>
+                      ) : (
+                        'Start Extraction'
+                      )}
+                    </button>
 
-                  {/* Cost Estimate */}
-                  {documents && documents.length > 0 && !isExtractionComplete && (
+                    {/* Progress Bar - Only show during processing */}
+                    {isProcessing && (
+                      <div className="space-y-2">
+                        <Progress value={extractionProgress} className="w-full h-2" />
+                        <div className="text-xs text-center text-muted-foreground">
+                          {extractionProgress}% complete
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Status Messages - Only show during processing */}
+                    {isProcessing && (
+                      <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="text-sm text-blue-800">
+                          <div className="font-medium mb-1">{extractionPhase}</div>
+                          <div className="text-xs text-blue-600">{extractionStatus}</div>
+                          <div className="text-xs text-blue-500 mt-1">
+                            Please wait while we process your documents...
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Cost Estimate - Only show when not processing */}
+                  {documents && documents.length > 0 && !isProcessing && !isExtractionComplete && (
                     <div className="mt-2 text-xs text-gray-500 text-center">
                       Estimated cost: {formatCost(estimateExtractionCost(
                         documents.length,
@@ -881,8 +1034,10 @@ function JobPageContent() {
 
 export default function JobPage() {
   return (
-    <Suspense fallback={<LoadingWithTips tips={jobTips} />}>
-      <JobPageContent />
-    </Suspense>
+    <div className="h-screen">
+      <Suspense fallback={<LoadingWithTips />}>
+        <JobPageContent />
+      </Suspense>
+    </div>
   );
 }

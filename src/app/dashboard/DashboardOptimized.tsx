@@ -38,7 +38,6 @@ import { useAuth } from "@/contexts/AuthContext"
 import { useRouter } from "next/navigation"
 import { PageLayout } from "@/components/PageLayout"
 import { LoadingWithTips } from "@/components/LoadingWithTips"
-import { dashboardTips } from "@/lib/loading-tips"
 import Link from "next/link"
 
 // React Query hooks - instant updates!
@@ -186,8 +185,7 @@ export default function DashboardOptimized() {
 
   // Show loading state with tips
   if (!mounted || jobsLoading || usersLoading) {
-    return <LoadingWithTips tips={dashboardTips} />;
-  }
+    return <LoadingWithTips />;
 
   // Show error state
   if (jobsError) {

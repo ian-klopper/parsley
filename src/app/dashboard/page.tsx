@@ -39,7 +39,6 @@ import { useState, useEffect } from "react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useRouter } from "next/navigation"
 import { LoadingWithTips } from "@/components/LoadingWithTips"
-import { dashboardTips } from "@/lib/loading-tips"
 import { UserService } from "@/lib/user-service"
 import Link from "next/link"
 
@@ -186,7 +185,7 @@ export default function Dashboard() {
   if (!mounted || jobsLoading || usersLoading) {
     return (
       <main className="h-screen bg-background flex items-center justify-center">
-        <LoadingWithTips tips={dashboardTips} />
+        <LoadingWithTips />
       </main>
     );
   }

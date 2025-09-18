@@ -22,7 +22,6 @@ import { useToast } from "@/hooks/use-toast"
 import { AccessControl } from "@/components/AccessControl"
 import { PageLayout } from "@/components/PageLayout"
 import { LoadingWithTips } from "@/components/LoadingWithTips"
-import { logsTips } from "@/lib/loading-tips"
 import { useTheme } from "next-themes"
 import { useState, useEffect, useCallback } from "react"
 import { ActivityLogWithUser } from "@/types/database";
@@ -862,13 +861,7 @@ export default function LogsPage() {
             </Button>
           </div>
               {loading ? (
-                <LoadingWithTips
-                  title="Loading Activity Logs"
-                  subtitle="Retrieving system activity and user actions..."
-                  tips={logsTips}
-                  size="sm"
-                  className="py-8"
-                />
+                <LoadingWithTips size="sm" className="py-8" />
               ) : (
                 <div className="flex justify-center">
                   <div className="w-full max-w-3xl">

@@ -26,7 +26,6 @@ import { ColorPicker } from "@/components/ui/color-picker"
 import { AccessControl } from "@/components/AccessControl"
 import { PageLayout } from "@/components/PageLayout"
 import { LoadingWithTips } from "@/components/LoadingWithTips"
-import { adminTips } from "@/lib/loading-tips"
 import { useAuth } from "@/contexts/AuthContext"
 import { UserService } from "@/lib/user-service"
 import { User } from "@/types/database"
@@ -110,13 +109,7 @@ export default function AdminPage() {
       <PageLayout title="Admin Panel" showBackButton={true}>
         <div className="w-full">
               {loading ? (
-                <LoadingWithTips
-                  title="Loading Admin Panel"
-                  subtitle="Fetching user data and permissions..."
-                  tips={adminTips}
-                  size="sm"
-                  className="py-8"
-                />
+                <LoadingWithTips size="sm" className="py-8" />
               ) : (
                 <Table>
                   <TableHeader>

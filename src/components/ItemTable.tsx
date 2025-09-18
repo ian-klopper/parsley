@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { FoodItem } from "@/lib/food-data";
-import { 
+import {
   Collapsible,
-  CollapsibleContent, 
-  CollapsibleTrigger 
+  CollapsibleContent,
+  CollapsibleTrigger
 } from "@/components/ui/collapsible";
 import {
   Table,
@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { ItemTableRow } from "./item-table";
 import { useItemTable } from "@/hooks/use-item-table";
 
-export const ItemTable = ({ items: initialItems, onItemsChange }: { items: FoodItem[], onItemsChange: (items: FoodItem[]) => void }) => {
+export const ItemTable = React.memo(({ items: initialItems, onItemsChange }: { items: FoodItem[], onItemsChange: (items: FoodItem[]) => void }) => {
   const [hoveredColumn, setHoveredColumn] = useState<string | null>(null);
   const {
     items,
@@ -120,4 +120,8 @@ export const ItemTable = ({ items: initialItems, onItemsChange }: { items: FoodI
       </TooltipProvider>
     </div>
   );
-};
+});
+
+ItemTable.displayName = "ItemTable";
+
+export default ItemTable;

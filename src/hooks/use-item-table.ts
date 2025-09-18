@@ -1,10 +1,16 @@
 'use client';
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { FoodItem } from "@/lib/food-data";
 
 export const useItemTable = (initialItems: FoodItem[], onItemsChange: (items: FoodItem[]) => void) => {
   const [items, setItems] = useState(initialItems);
+
+  // Sync with prop changes - critical for real-time updates
+  useEffect(() => {
+    console.log('🔄 useItemTable: Syncing with new initialItems:', initialItems.length);
+    setItems(initialItems);
+  }, [initialItems]);
 
   const handleItemChange = useCallback(<K extends keyof FoodItem>(index: number, field: K, value: FoodItem[K]) => {
     const newItems = [...items];

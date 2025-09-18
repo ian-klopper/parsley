@@ -299,6 +299,46 @@ export function useJobExtractionResults(jobId: string) {
           filter: `job_id=eq.${jobId}`,
         },
         (payload) => {
+          console.log('🔄 Extraction results changed:', payload);
+          queryClient.invalidateQueries({ queryKey: [JOBS_QUERY_KEY, jobId, 'extraction'] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'menu_items',
+          filter: `job_id=eq.${jobId}`,
+        },
+        (payload) => {
+          console.log('🔄 Menu items changed:', payload);
+          queryClient.invalidateQueries({ queryKey: [JOBS_QUERY_KEY, jobId, 'extraction'] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'item_modifiers',
+        },
+        (payload) => {
+          console.log('🔄 Item modifiers changed:', payload);
+          // Check if this modifier change is related to our job by invalidating extraction data
+          queryClient.invalidateQueries({ queryKey: [JOBS_QUERY_KEY, jobId, 'extraction'] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'item_sizes',
+        },
+        (payload) => {
+          console.log('🔄 Item sizes changed:', payload);
+          // Check if this size change is related to our job by invalidating extraction data
           queryClient.invalidateQueries({ queryKey: [JOBS_QUERY_KEY, jobId, 'extraction'] });
         }
       )

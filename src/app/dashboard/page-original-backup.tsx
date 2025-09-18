@@ -42,7 +42,6 @@ import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { PageLayout } from "@/components/PageLayout"
 import { LoadingWithTips } from "@/components/LoadingWithTips"
-import { dashboardTips, authTips } from "@/lib/loading-tips"
 import Link from "next/link"
 
 
@@ -291,26 +290,14 @@ export default function Home() {
 
   if (loading) {
     return (
-      <LoadingWithTips
-        title="Loading Dashboard"
-        subtitle="Preparing your jobs and workspace..."
-        tips={dashboardTips}
-        size="md"
-        className="h-screen"
-      />
+      <LoadingWithTips size="md" className="h-screen" />
     );
   }
 
   // Show pending approval message for users without profile or pending approval
   if (isAuthenticated && isPendingApproval) {
     return (
-      <LoadingWithTips
-        title="Account Pending Approval"
-        subtitle={`Signed in as: ${user?.email}. Your account is being reviewed by an administrator.`}
-        tips={authTips}
-        size="md"
-        className="h-screen"
-      />
+      <LoadingWithTips size="md" className="h-screen" />
     );
   }
 

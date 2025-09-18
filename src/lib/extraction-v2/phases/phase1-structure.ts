@@ -129,11 +129,23 @@ IMPORTANT: Use the exact documentId values from the DOCUMENT REFERENCE INFO abov
         });
         debugLogger.debug(1, 'IMAGE_ADDED', `Added image: ${doc.name}`);
       } else if (doc.type === 'pdf' && doc.pages) {
-        // For PDFs, add text content from pages
+        // For PDFs, add both text and image-based pages
         for (const page of doc.pages.slice(0, 3)) { // First 3 pages
-          if (!page.isImage && page.content) {
-            const preview = page.content.substring(0, 500);
-            parts.push({ text: `\nPDF ${doc.name} Page ${page.pageNumber}:\n${preview}\n` });
+          if (page.isImage && page.content) {
+            // Send image-based PDF pages as PDFs
+            parts.push({
+              inlineData: {
+                mimeType: 'application/pdf',
+                data: page.content  // base64 PDF data
+              }
+            });
+            debugLogger.debug(1, 'PDF_IMAGE_PAGE_ADDED', `Added image page ${page.pageNumber} from ${doc.name}`);
+          } else if (page.content) {
+            // Send text-based pages as text - use more content for better structure analysis
+            const contentLength = page.content.length;
+            const preview = contentLength <= 5000 ? page.content : page.content.substring(0, 5000);
+            parts.push({ text: `\nPDF ${doc.name} Page ${page.pageNumber}:\n${preview}${contentLength > 5000 ? '\n[Content truncated...]' : ''}\n` });
+            debugLogger.debug(1, 'PDF_TEXT_PAGE_ADDED', `Added text page ${page.pageNumber} from ${doc.name} (${preview.length}/${contentLength} chars)`);
           }
         }
         debugLogger.debug(1, 'PDF_PAGES_ADDED', `Added ${Math.min(3, doc.pages.length)} pages from ${doc.name}`);
@@ -147,8 +159,44 @@ IMPORTANT: Use the exact documentId values from the DOCUMENT REFERENCE INFO abov
       }
     }
 
+    // Calculate total inline data size to avoid exceeding Gemini's 20MB limit
+    const totalInlineDataSize = parts
+      .filter(part => part.inlineData)
+      .reduce((sum, part) => sum + (part.inlineData?.data?.length || 0), 0);
+
     const estimatedTokens = estimateTextTokens(promptText) + (documents.filter(d => d.type === 'image').length * 1000);
-    debugLogger.debug(1, 'MULTIMODAL_CONTENT_CREATED', `${parts.length} parts, ~${estimatedTokens} tokens`);
+    debugLogger.debug(1, 'MULTIMODAL_CONTENT_CREATED', `${parts.length} parts, ~${estimatedTokens} tokens, ${(totalInlineDataSize / 1024 / 1024).toFixed(1)}MB inline data`);
+
+    // Check if we exceed Google's 20MB limit for inline data
+    if (totalInlineDataSize > 20 * 1024 * 1024) {
+      debugLogger.warn(1, 'INLINE_DATA_SIZE_EXCEEDED', `${(totalInlineDataSize / 1024 / 1024).toFixed(1)}MB exceeds 20MB limit - reducing documents`);
+      // Remove some PDF parts to stay under limit
+      const reducedParts = [parts[0]]; // Keep the prompt
+      let currentSize = 0;
+      for (let i = 1; i < parts.length; i++) {
+        const partSize = parts[i].inlineData?.data?.length || 0;
+        if (currentSize + partSize < 20 * 1024 * 1024) {
+          reducedParts.push(parts[i]);
+          currentSize += partSize;
+        } else {
+          debugLogger.debug(1, 'DOCUMENT_SKIPPED', `Skipping document to stay under size limit`);
+          break;
+        }
+      }
+      parts.splice(0, parts.length, ...reducedParts);
+      debugLogger.debug(1, 'CONTENT_REDUCED', `Reduced to ${parts.length} parts, ${(currentSize / 1024 / 1024).toFixed(1)}MB`);
+    }
+
+    // Debug: Log what Phase 1 AI will actually see
+    console.log(`🔍 PHASE 1 AI CONTENT DEBUG:`);
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].text) {
+        const textPreview = parts[i].text.substring(0, 200);
+        console.log(`  Part ${i+1} (text): ${textPreview}${parts[i].text.length > 200 ? '...' : ''}`);
+      } else if (parts[i].inlineData) {
+        console.log(`  Part ${i+1} (PDF): [Base64 PDF data - ${parts[i].inlineData.data?.length || 0} bytes]`);
+      }
+    }
 
     // Make API call to Gemini 2.5 Flash with multimodal content
     debugLogger.apiCallStart(1, 1, 'gemini-2.5-flash', estimatedTokens);

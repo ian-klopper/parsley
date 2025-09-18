@@ -17,7 +17,7 @@ export interface DocumentMeta {
 
 export interface PreparedPage {
   pageNumber: number;
-  content: string; // Text or base64 image
+  content: string; // Text or base64 image data
   isImage: boolean;
   tokens: number;
   hasContent: boolean;
@@ -121,6 +121,7 @@ export interface ExtractionBatch {
   section?: MenuSection;
   content: string; // Text or base64
   isImage: boolean;
+  contentType?: string; // MIME type for images: 'image/jpeg' or 'application/pdf'
   tokens: number;
   model: 'pro' | 'flash' | 'flash-lite';
   sourceRefs: DocumentLocation[];

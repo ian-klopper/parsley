@@ -5,6 +5,7 @@ import { UserService } from '@/lib/user-service';
 import { useToast } from '@/hooks/use-toast';
 import { User } from '@/types/database';
 
+const ALL_USERS_QUERY_KEY = 'allUsers';
 const USERS_QUERY_KEY = 'users';
 const ACTIVE_USERS_QUERY_KEY = 'activeUsers';
 const CURRENT_USER_QUERY_KEY = 'currentUser';
@@ -29,7 +30,7 @@ export function useUsers() {
   return useQuery({
     queryKey: [USERS_QUERY_KEY],
     queryFn: async () => {
-      const result = await UserService.getAllUsers();
+      const result = await UserService.getActiveUsers();
       if (result.error) {
         throw new Error(result.error);
       }
@@ -81,9 +82,9 @@ export function useUpdateUserRole() {
       return result.user!;
     },
     onMutate: async ({ userId, role }) => {
-      await queryClient.cancelQueries({ queryKey: [USERS_QUERY_KEY] });
+      await queryClient.cancelQueries({ queryKey: [ALL_USERS_QUERY_KEY] });
 
-      const previousUsers = queryClient.getQueryData<User[]>([USERS_QUERY_KEY]);
+      const previousUsers = queryClient.getQueryData<User[]>([ALL_USERS_QUERY_KEY]);
 
       // Optimistically update user role
       if (previousUsers) {
@@ -92,7 +93,7 @@ export function useUpdateUserRole() {
             ? { ...user, role, updated_at: new Date().toISOString() }
             : user
         );
-        queryClient.setQueryData([USERS_QUERY_KEY], updatedUsers);
+        queryClient.setQueryData([ALL_USERS_QUERY_KEY], updatedUsers);
       }
 
       return { previousUsers };
@@ -100,7 +101,7 @@ export function useUpdateUserRole() {
     onError: (err, { userId }, context) => {
       // Rollback optimistic update
       if (context?.previousUsers) {
-        queryClient.setQueryData([USERS_QUERY_KEY], context.previousUsers);
+        queryClient.setQueryData([ALL_USERS_QUERY_KEY], context.previousUsers);
       }
       toast({
         title: "Error updating user role",
@@ -115,7 +116,7 @@ export function useUpdateUserRole() {
       });
 
       // Invalidate queries to ensure consistency
-      queryClient.invalidateQueries({ queryKey: [USERS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [ALL_USERS_QUERY_KEY] });
     },
   });
 }
@@ -134,9 +135,9 @@ export function useUpdateUserColor() {
       return { userId, colorIndex };
     },
     onMutate: async ({ userId, colorIndex }) => {
-      await queryClient.cancelQueries({ queryKey: [USERS_QUERY_KEY] });
+      await queryClient.cancelQueries({ queryKey: [ALL_USERS_QUERY_KEY] });
 
-      const previousUsers = queryClient.getQueryData<User[]>([USERS_QUERY_KEY]);
+      const previousUsers = queryClient.getQueryData<User[]>([ALL_USERS_QUERY_KEY]);
 
       // Optimistically update user color
       if (previousUsers) {
@@ -145,7 +146,7 @@ export function useUpdateUserColor() {
             ? { ...user, color_index: colorIndex, updated_at: new Date().toISOString() }
             : user
         );
-        queryClient.setQueryData([USERS_QUERY_KEY], updatedUsers);
+        queryClient.setQueryData([ALL_USERS_QUERY_KEY], updatedUsers);
       }
 
       // Also update current user if it's the same user
@@ -163,7 +164,7 @@ export function useUpdateUserColor() {
     onError: (err, { userId }, context) => {
       // Rollback optimistic updates
       if (context?.previousUsers) {
-        queryClient.setQueryData([USERS_QUERY_KEY], context.previousUsers);
+        queryClient.setQueryData([ALL_USERS_QUERY_KEY], context.previousUsers);
       }
       if (context?.previousCurrentUser) {
         queryClient.setQueryData([CURRENT_USER_QUERY_KEY], context.previousCurrentUser);
@@ -172,12 +173,6 @@ export function useUpdateUserColor() {
         title: "Error updating user color",
         description: err.message,
         variant: "destructive",
-      });
-    },
-    onSuccess: () => {
-      toast({
-        title: "Color updated successfully",
-        description: "User color has been updated.",
       });
     },
   });
@@ -231,7 +226,7 @@ export function useUpdateCurrentUser() {
       });
 
       // Invalidate related queries
-      queryClient.invalidateQueries({ queryKey: [USERS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [ALL_USERS_QUERY_KEY] });
     },
   });
 }

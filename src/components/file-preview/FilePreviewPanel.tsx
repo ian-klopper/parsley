@@ -167,7 +167,7 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ jobId }) => 
   }
 
   return (
-    <div className="w-full space-y-8 pb-8">
+    <div className="w-full space-y-8 pb-8 overflow-hidden">
       {previews.map((preview, index) => {
         const document = documents[index];
         if (!document) return null;

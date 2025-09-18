@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { PageLayout } from "@/components/PageLayout"
+import { LoadingWithTips } from "@/components/LoadingWithTips"
 
 export default function PendingPage() {
   const { user, userProfile, loading, refreshProfile } = useAuth()
@@ -35,7 +36,7 @@ export default function PendingPage() {
     return (
       <PageLayout title="Loading..." showBackButton={true}>
         <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="animate-spin rounded-full h-32 w-32 bg-gradient-to-r from-primary via-primary/50 to-transparent"></div>
+          <LoadingWithTips size="lg" />
         </div>
       </PageLayout>
     )

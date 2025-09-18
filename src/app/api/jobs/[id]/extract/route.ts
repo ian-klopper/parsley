@@ -67,7 +67,14 @@ function convertToLegacyFormat(item: FinalMenuItem): any {
       size: size.size,
       price: size.price
     })),
-    modifierGroups: item.modifierGroups.map(group => group.name).join(', ')
+    modifierGroups: item.modifierGroups.map(group => {
+      // Format each modifier group with its options
+      if (group.options && group.options.length > 0) {
+        const optionsList = group.options.join(', ');
+        return `${group.name}: ${optionsList}`;
+      }
+      return group.name;
+    }).join(', ')
   };
 }
 
@@ -289,13 +296,93 @@ export async function GET(
 
     // Initialize all tabs
     allTabs.forEach(tab => {
-      organizedData[tab] = [];
+      if (tab === 'Modifiers') {
+        organizedData[tab] = { food: [], beverage: [] };
+      } else {
+        organizedData[tab] = [];
+      }
     });
 
     // Map each item to its appropriate tab
     items.forEach(item => {
       const tab = getTabForCategory(item.subcategory);
       organizedData[tab].push(item);
+    });
+
+    // Extract and organize modifiers
+    console.log('🔧 Extracting modifiers from', menuItems?.length || 0, 'menu items');
+    const modifierMap = new Map<string, { group: string; options: any[]; itemCategories: Set<string> }>();
+
+    // Collect all unique modifiers from items
+    (menuItems || []).forEach((item: any) => {
+      if (item.item_modifiers && item.item_modifiers.length > 0) {
+        item.item_modifiers.forEach((mod: any) => {
+          const groupName = mod.modifier_group;
+
+          // Parse options if it's a JSON string
+          let options = mod.options;
+          if (typeof options === 'string') {
+            try {
+              options = JSON.parse(options);
+            } catch (e) {
+              console.warn('Failed to parse modifier options:', options);
+              options = [];
+            }
+          }
+
+          if (!modifierMap.has(groupName)) {
+            modifierMap.set(groupName, {
+              group: groupName,
+              options: Array.isArray(options) ? options : [],
+              itemCategories: new Set()
+            });
+          }
+
+          // Track which categories this modifier appears in
+          modifierMap.get(groupName)?.itemCategories.add(item.subcategory);
+        });
+      }
+    });
+
+    // Categorize modifiers as food or beverage based on item categories
+    const foodCategories = new Set(['Open Food', 'Appetizers', 'Salads', 'Entrees', 'Sides', 'Desserts']);
+    const beverageCategories = new Set([
+      'Open Liquor', 'Tequila | Mezcal', 'Vodka', 'Whiskey', 'Scotch', 'Gin', 'Rum', 'Liqueurs | Other',
+      'Cocktails', 'Shots', 'Open Beer', 'Draft Beer', 'Bottle | Can Beer', 'Liquor RTDs', 'Malt RTDs', 'Wine RTDs',
+      'Open Wine', 'Red Wine', 'White Wine', 'Sparkling Wine', 'Non-Alcoholic', 'Mocktails'
+    ]);
+
+    const modifierData = organizedData['Modifiers'] as { food: any[], beverage: any[] };
+
+    modifierMap.forEach((modifierInfo, groupName) => {
+      const isFoodModifier = Array.from(modifierInfo.itemCategories).some(cat => foodCategories.has(cat));
+      const isBeverageModifier = Array.from(modifierInfo.itemCategories).some(cat => beverageCategories.has(cat));
+
+      const modifierEntry = {
+        name: groupName,
+        options: modifierInfo.options
+      };
+
+      // If it appears in food items, add to food modifiers
+      if (isFoodModifier) {
+        modifierData.food.push(modifierEntry);
+      }
+
+      // If it appears in beverage items, add to beverage modifiers
+      if (isBeverageModifier) {
+        modifierData.beverage.push(modifierEntry);
+      }
+
+      // If it doesn't clearly belong to either, default to food
+      if (!isFoodModifier && !isBeverageModifier) {
+        modifierData.food.push(modifierEntry);
+      }
+    });
+
+    console.log('🔧 Extracted modifiers:', {
+      food: modifierData.food.length,
+      beverage: modifierData.beverage.length,
+      total: modifierMap.size
     });
 
     // Update Menu Structure tab with overview info
