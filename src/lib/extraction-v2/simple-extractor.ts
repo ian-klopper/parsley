@@ -15,34 +15,6 @@ import { parseSpreadsheetToMenuItems, isSpreadsheet, analyzeSpreadsheet } from '
 // Load environment variables
 dotenv.config({ path: '.env.local' });
 
-/**
- * Process items with controlled concurrency to avoid rate limits
- */
-async function processWithConcurrency<T, R>(
-  items: T[],
-  processor: (item: T, index: number) => Promise<R>,
-  maxConcurrency: number = 3
-): Promise<R[]> {
-  const results: R[] = [];
-  
-  for (let i = 0; i < items.length; i += maxConcurrency) {
-    const batch = items.slice(i, i + maxConcurrency);
-    const batchPromises = batch.map((item, batchIndex) => 
-      processor(item, i + batchIndex)
-    );
-    
-    const batchResults = await Promise.all(batchPromises);
-    results.push(...batchResults);
-    
-    // Add a small delay between batches to be gentle on the API
-    if (i + maxConcurrency < items.length) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-  }
-  
-  return results;
-}
-
 // Initialize API clients lazily to avoid build-time errors
 let genAI: GoogleGenerativeAI | null = null;
 let fileManager: GoogleAIFileManager | null = null;
@@ -786,14 +758,63 @@ function findDuplicateInCache(item: SimpleMenuItem, cache: ExtractionCache): boo
 }
 
 /**
+ * Progress callback type for real-time extraction updates
+ */
+export interface ExtractionProgress {
+  phase: 'starting' | 'uploading' | 'processing' | 'finalizing' | 'complete';
+  currentFile: string;
+  filesProcessed: number;
+  totalFiles: number;
+  itemsExtracted: number;
+  currentStep: string;
+  progress: number; // 0-100
+  startTime: number;
+  estimatedTimeRemaining?: number;
+}
+
+export type ProgressCallback = (progress: ExtractionProgress) => Promise<void>;
+
+/**
  * Main extraction function
  */
 export async function extractMenuSimple(
   filePaths: string[],
-  documentIds?: string[]
+  documentIds?: string[],
+  onProgress?: ProgressCallback
 ): Promise<ExtractionCache> {
+  const startTime = Date.now();
   console.log('🚀 Starting Simple Menu Extraction Pipeline');
   console.log(`📁 Processing ${filePaths.length} documents`);
+
+  // Helper function to update progress
+  const updateProgress = async (
+    phase: ExtractionProgress['phase'],
+    currentFile: string,
+    filesProcessed: number,
+    itemsExtracted: number,
+    currentStep: string,
+    progress: number
+  ) => {
+    if (onProgress) {
+      const elapsed = Date.now() - startTime;
+      const estimatedTotal = progress > 0 ? (elapsed / progress) * 100 : null;
+      const estimatedTimeRemaining = estimatedTotal ? estimatedTotal - elapsed : null;
+
+      await onProgress({
+        phase,
+        currentFile,
+        filesProcessed,
+        totalFiles: filePaths.length,
+        itemsExtracted,
+        currentStep,
+        progress,
+        startTime,
+        estimatedTimeRemaining: estimatedTimeRemaining || undefined
+      });
+    }
+  };
+
+  await updateProgress('starting', '', 0, 0, 'Initializing extraction...', 0);
 
   // Generate document IDs if not provided - now with enhanced uniqueness
   const docIds = documentIds || filePaths.map((path, i) => generateUniqueDocumentId(path, i));
@@ -823,8 +844,19 @@ export async function extractMenuSimple(
 
   // Process spreadsheets directly (no upload needed)
   console.log('\n📊 Step 1: Processing spreadsheets directly...');
+  await updateProgress('processing', '', 0, 0, 'Processing spreadsheets...', 5);
+  
   for (let i = 0; i < spreadsheetFiles.length; i++) {
     const { path, id } = spreadsheetFiles[i];
+
+    await updateProgress(
+      'processing',
+      path.split('/').pop() || path,
+      i,
+      cache.items.length,
+      `Processing spreadsheet ${i + 1}/${spreadsheetFiles.length}`,
+      5 + (i / spreadsheetFiles.length) * 15 // 5-20% for spreadsheets
+    );
 
     try {
       // Process spreadsheet with current cache context
@@ -880,61 +912,49 @@ export async function extractMenuSimple(
 
   // Upload and process regular files through Gemini
   console.log('\n📤 Step 2: Uploading regular documents to Files API...');
+  await updateProgress('uploading', '', spreadsheetFiles.length, cache.items.length, 'Uploading documents...', 20);
+  
   const uploadedFiles: UploadedFile[] = [];
 
-  // Process uploads with controlled concurrency to avoid rate limits
-  const uploadResults = await processWithConcurrency(
-    regularFiles,
-    async ({ path, id }: { path: string; id: string }, index: number) => {
-      try {
-        console.log(`📤 Uploading: ${id}`);
-        const uploaded = await uploadDocument(path, id);
-        return uploaded;
-      } catch (error) {
-        console.error(`⚠️  Skipping ${id} due to upload failure:`, error);
-        cache.totalFiles--;
-        return null;
-      }
-    },
-    3 // Max 3 concurrent uploads to respect API rate limits
-  );
-  
-  // Filter out failed uploads
-  uploadedFiles.push(...uploadResults.filter((result): result is UploadedFile => result !== null));
+  // Upload regular files only
+  for (let i = 0; i < regularFiles.length; i++) {
+    const { path, id } = regularFiles[i];
+    
+    await updateProgress(
+      'uploading',
+      path.split('/').pop() || path,
+      spreadsheetFiles.length + i,
+      cache.items.length,
+      `Uploading file ${i + 1}/${regularFiles.length}`,
+      20 + (i / regularFiles.length) * 30 // 20-50% for uploads
+    );
+    
+    try {
+      const uploaded = await uploadDocument(path, id);
+      uploadedFiles.push(uploaded);
+    } catch (error) {
+      console.error(`⚠️  Skipping ${id} due to upload failure`);
+      cache.totalFiles--;
+    }
+  }
 
   console.log(`\n✅ Successfully uploaded ${uploadedFiles.length}/${regularFiles.length} regular documents`);
 
   // Process regular documents one by one
-    console.log('\n🔄 Step 3: Processing regular documents with progressive caching...');
-
-  // Process documents with controlled concurrency to avoid rate limits
-  await processWithConcurrency(
-    uploadedFiles,
-    async (file: UploadedFile, index: number) => {
-      // Process document with current cache context
-      const result = await processDocument(file, cache, index + spreadsheetFiles.length);
-
-      // Update master cache with deduplication
-      if (result.newItems.length > 0) {
-        const uniqueItems = result.newItems.filter(item => !findDuplicateInCache(item, cache));
-        const duplicateCount = result.newItems.length - uniqueItems.length;
-
-        cache.items.push(...uniqueItems);
-        cache.processedFiles.push(file.documentId);
-        cache.lastUpdated = new Date().toISOString();
-
-        console.log(`✅ [${index + 1 + spreadsheetFiles.length}/${cache.totalFiles}] ${file.documentId}: +${uniqueItems.length} items (${duplicateCount} duplicates filtered)`);
-      } else {
-        console.log(`📝 [${index + 1 + spreadsheetFiles.length}/${cache.totalFiles}] ${file.documentId}: No new items found`);
-      }
-
-      return result;
-    },
-    2 // Max 2 concurrent document processing to avoid overwhelming the API
-  );
+  console.log('\n🔄 Step 3: Processing regular documents with progressive caching...');
+  await updateProgress('processing', '', spreadsheetFiles.length + uploadedFiles.length, cache.items.length, 'Processing documents with AI...', 50);
 
   for (let i = 0; i < uploadedFiles.length; i++) {
     const file = uploadedFiles[i];
+
+    await updateProgress(
+      'processing',
+      file.documentId,
+      spreadsheetFiles.length + i,
+      cache.items.length,
+      `Processing document ${i + 1}/${uploadedFiles.length}`,
+      50 + (i / uploadedFiles.length) * 40 // 50-90% for processing
+    );
 
     // Process document with current cache context
     const result = await processDocument(file, cache, i + spreadsheetFiles.length);
@@ -982,6 +1002,9 @@ export async function extractMenuSimple(
     .forEach(([category, count]) => {
       console.log(`  - ${category}: ${count} items`);
     });
+
+  // Final progress update
+  await updateProgress('complete', '', filePaths.length, cache.items.length, 'Extraction completed!', 100);
 
   return cache;
 }
