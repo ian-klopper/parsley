@@ -15,6 +15,34 @@ import { parseSpreadsheetToMenuItems, isSpreadsheet, analyzeSpreadsheet } from '
 // Load environment variables
 dotenv.config({ path: '.env.local' });
 
+/**
+ * Process items with controlled concurrency to avoid rate limits
+ */
+async function processWithConcurrency<T, R>(
+  items: T[],
+  processor: (item: T, index: number) => Promise<R>,
+  maxConcurrency: number = 3
+): Promise<R[]> {
+  const results: R[] = [];
+  
+  for (let i = 0; i < items.length; i += maxConcurrency) {
+    const batch = items.slice(i, i + maxConcurrency);
+    const batchPromises = batch.map((item, batchIndex) => 
+      processor(item, i + batchIndex)
+    );
+    
+    const batchResults = await Promise.all(batchPromises);
+    results.push(...batchResults);
+    
+    // Add a small delay between batches to be gentle on the API
+    if (i + maxConcurrency < items.length) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  
+  return results;
+}
+
 // Initialize API clients lazily to avoid build-time errors
 let genAI: GoogleGenerativeAI | null = null;
 let fileManager: GoogleAIFileManager | null = null;
@@ -854,29 +882,56 @@ export async function extractMenuSimple(
   console.log('\n📤 Step 2: Uploading regular documents to Files API...');
   const uploadedFiles: UploadedFile[] = [];
 
-  // Upload regular files in parallel (with limited concurrency)
-  const uploadPromises = regularFiles.map(async ({ path, id }, index) => {
-    try {
-      console.log(`📤 Uploading: ${id}`);
-      const uploaded = await uploadDocument(path, id);
-      return uploaded;
-    } catch (error) {
-      console.error(`⚠️  Skipping ${id} due to upload failure:`, error);
-      cache.totalFiles--;
-      return null;
-    }
-  });
-
-  // Wait for all uploads to complete
-  const uploadResults = await Promise.all(uploadPromises);
+  // Process uploads with controlled concurrency to avoid rate limits
+  const uploadResults = await processWithConcurrency(
+    regularFiles,
+    async ({ path, id }: { path: string; id: string }, index: number) => {
+      try {
+        console.log(`📤 Uploading: ${id}`);
+        const uploaded = await uploadDocument(path, id);
+        return uploaded;
+      } catch (error) {
+        console.error(`⚠️  Skipping ${id} due to upload failure:`, error);
+        cache.totalFiles--;
+        return null;
+      }
+    },
+    3 // Max 3 concurrent uploads to respect API rate limits
+  );
   
   // Filter out failed uploads
-  uploadedFiles.push(...uploadResults.filter(result => result !== null));
+  uploadedFiles.push(...uploadResults.filter((result): result is UploadedFile => result !== null));
 
   console.log(`\n✅ Successfully uploaded ${uploadedFiles.length}/${regularFiles.length} regular documents`);
 
   // Process regular documents one by one
-  console.log('\n🔄 Step 3: Processing regular documents with progressive caching...');
+    console.log('\n🔄 Step 3: Processing regular documents with progressive caching...');
+
+  // Process documents with controlled concurrency to avoid rate limits
+  await processWithConcurrency(
+    uploadedFiles,
+    async (file: UploadedFile, index: number) => {
+      // Process document with current cache context
+      const result = await processDocument(file, cache, index + spreadsheetFiles.length);
+
+      // Update master cache with deduplication
+      if (result.newItems.length > 0) {
+        const uniqueItems = result.newItems.filter(item => !findDuplicateInCache(item, cache));
+        const duplicateCount = result.newItems.length - uniqueItems.length;
+
+        cache.items.push(...uniqueItems);
+        cache.processedFiles.push(file.documentId);
+        cache.lastUpdated = new Date().toISOString();
+
+        console.log(`✅ [${index + 1 + spreadsheetFiles.length}/${cache.totalFiles}] ${file.documentId}: +${uniqueItems.length} items (${duplicateCount} duplicates filtered)`);
+      } else {
+        console.log(`📝 [${index + 1 + spreadsheetFiles.length}/${cache.totalFiles}] ${file.documentId}: No new items found`);
+      }
+
+      return result;
+    },
+    2 // Max 2 concurrent document processing to avoid overwhelming the API
+  );
 
   for (let i = 0; i < uploadedFiles.length; i++) {
     const file = uploadedFiles[i];
