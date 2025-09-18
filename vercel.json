@@ -31,6 +31,9 @@
     "src/app/auth/callback/route.ts": {
       "maxDuration": 10
     },
+    "src/app/api/jobs/simple-extract/route.ts": {
+      "maxDuration": 60
+    },
     "src/app/api/**/route.ts": {
       "maxDuration": 10
     }

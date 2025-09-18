@@ -854,17 +854,24 @@ export async function extractMenuSimple(
   console.log('\n📤 Step 2: Uploading regular documents to Files API...');
   const uploadedFiles: UploadedFile[] = [];
 
-  // Upload regular files only
-  for (let i = 0; i < regularFiles.length; i++) {
-    const { path, id } = regularFiles[i];
+  // Upload regular files in parallel (with limited concurrency)
+  const uploadPromises = regularFiles.map(async ({ path, id }, index) => {
     try {
+      console.log(`📤 Uploading: ${id}`);
       const uploaded = await uploadDocument(path, id);
-      uploadedFiles.push(uploaded);
+      return uploaded;
     } catch (error) {
-      console.error(`⚠️  Skipping ${id} due to upload failure`);
+      console.error(`⚠️  Skipping ${id} due to upload failure:`, error);
       cache.totalFiles--;
+      return null;
     }
-  }
+  });
+
+  // Wait for all uploads to complete
+  const uploadResults = await Promise.all(uploadPromises);
+  
+  // Filter out failed uploads
+  uploadedFiles.push(...uploadResults.filter(result => result !== null));
 
   console.log(`\n✅ Successfully uploaded ${uploadedFiles.length}/${regularFiles.length} regular documents`);
 
