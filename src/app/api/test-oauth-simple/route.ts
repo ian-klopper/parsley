@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   }
 
   // Try to exchange the code
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const supabase = createClient(cookieStore)
 
   console.log('Test OAuth: Attempting exchange with code:', code.substring(0, 10) + '...')

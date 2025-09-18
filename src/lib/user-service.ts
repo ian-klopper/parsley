@@ -3,15 +3,15 @@ import { apiClient } from './services/api-client';
 export interface User {
   id: string;
   email: string;
-  full_name?: string;
+  full_name: string | null;
   role: 'pending' | 'user' | 'admin';
   created_at: string;
   updated_at: string;
-  approved_at?: string;
-  approved_by?: string;
-  avatar_url?: string;
-  color_index?: number;
-  initials?: string;
+  approved_at: string | null;
+  approved_by: string | null;
+  avatar_url: string | null;
+  color_index: number | null;
+  initials: string | null;
 }
 
 export class UserService {

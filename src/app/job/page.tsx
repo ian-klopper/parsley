@@ -11,7 +11,18 @@ import {
   AvatarFallback,
 } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Users, Crown, Upload, Play, Trash2, FileText, Image, FileSpreadsheet, Table as TableIcon, File, Download, X } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Users, Crown, Upload, Play, Trash2, FileText, Image, FileSpreadsheet, Table as TableIcon, File, Download, X, RotateCcw, AlertTriangle } from "lucide-react"
 import { UserNavigation } from "@/components/UserNavigation"
 import {
   DropdownMenu,
@@ -118,6 +129,8 @@ function JobPageContent() {
   const [transferOwnershipDialog, setTransferOwnershipDialog] = useState(false);
   const [newOwnerEmail, setNewOwnerEmail] = useState('');
   const [deleteDialog, setDeleteDialog] = useState(false);
+  const [resetDialog, setResetDialog] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [latestExtractionData, setLatestExtractionData] = useState<any>(null);
 
   // Progress tracking state
@@ -125,6 +138,7 @@ function JobPageContent() {
   const [extractionStatus, setExtractionStatus] = useState('');
   const [extractionPhase, setExtractionPhase] = useState('');
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+  const [isSimpleProcessing, setIsSimpleProcessing] = useState(false);
 
   const tabs = allTabs;
 
@@ -452,6 +466,134 @@ function JobPageContent() {
     }
   };
 
+  const handleSimpleExtraction = async () => {
+    if (!documents || documents.length === 0 || !job?.id) return;
+
+    setIsSimpleProcessing(true);
+
+    try {
+      console.log('🚀 Starting simple extraction...');
+
+      // Prepare documents for simple extraction
+      const simpleDocs = documents
+        .filter(doc => doc.file_url && doc.file_name) // Only include docs with valid URLs and names
+        .map(doc => ({
+          url: doc.file_url,
+          name: doc.file_name,
+          type: doc.file_type || 'unknown'
+        }));
+
+      if (simpleDocs.length === 0) {
+        throw new Error('No valid documents found for extraction');
+      }
+
+      console.log(`📄 Prepared ${simpleDocs.length} documents for simple extraction`);
+
+      // Call simple extraction API
+      const response = await fetch('/api/jobs/simple-extract', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          jobId: job.id,
+          documents: simpleDocs
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Simple extraction failed');
+      }
+
+      const result = await response.json();
+      console.log('✅ Simple extraction completed:', result);
+
+      toast({
+        title: "Simple Extraction Complete",
+        description: `Successfully extracted ${result.results?.totalItems || 0} items from ${result.results?.totalDocuments || 0} documents`,
+      });
+
+      // Force query invalidation to refresh job data
+      queryClient.invalidateQueries({
+        queryKey: ['job', jobId],
+        exact: true
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['jobs', jobId, 'extraction'],
+        exact: true
+      });
+
+    } catch (error) {
+      console.error('Simple extraction error:', error);
+      toast({
+        title: "Simple Extraction Failed",
+        description: error instanceof Error ? error.message : 'Unknown error occurred',
+        variant: "destructive"
+      });
+    } finally {
+      setIsSimpleProcessing(false);
+    }
+  };
+
+  const handleResetJob = async () => {
+    if (!job?.id) return;
+
+    setIsResetting(true);
+
+    try {
+      const response = await fetch(`/api/jobs/${job.id}/reset`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast({
+          title: "Job Reset Successfully",
+          description: `Deleted ${result.summary.totalRecordsDeleted} records. Job returned to pending status with uploaded files preserved.`,
+        });
+
+        // Force refresh of job data
+        queryClient.invalidateQueries({
+          queryKey: ['job', job.id],
+          exact: true
+        });
+        queryClient.invalidateQueries({
+          queryKey: ['jobs', job.id, 'extraction'],
+          exact: true
+        });
+
+        // Reset local state
+        setOrganizedData({});
+        setItems([]);
+        setLatestExtractionData(null);
+        setExtractionProgress(0);
+        setExtractionStatus('');
+        setExtractionPhase('');
+
+        setResetDialog(false);
+      } else {
+        toast({
+          title: "Reset Failed",
+          description: "Failed to reset job: " + result.error,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Reset Failed",
+        description: "Failed to reset job: " + (error instanceof Error ? error.message : 'Unknown error'),
+        variant: "destructive",
+      });
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
 
   const handleCollaboratorClick = (user: any) => {
     if (!canEdit) return;
@@ -586,11 +728,17 @@ function JobPageContent() {
                                           <h4 className="font-medium text-sm">{group.name}</h4>
                                           {group.options?.length > 0 && (
                                             <ul className="mt-1 space-y-1">
-                                              {group.options.map((option: any, optIndex: number) => (
-                                                <li key={optIndex} className="text-xs text-gray-600 ml-2">
-                                                  • {option.name} {option.price && `(+$${option.price})`}
-                                                </li>
-                                              ))}
+                                              {group.options.map((option: any, optIndex: number) => {
+                                                // Handle both string arrays and object arrays
+                                                const optionName = typeof option === 'string' ? option : option.name;
+                                                const optionPrice = typeof option === 'object' ? option.price : null;
+
+                                                return (
+                                                  <li key={optIndex} className="text-xs text-gray-600 ml-2">
+                                                    • {optionName} {optionPrice && `(+$${optionPrice})`}
+                                                  </li>
+                                                );
+                                              })}
                                             </ul>
                                           )}
                                         </div>
@@ -611,11 +759,17 @@ function JobPageContent() {
                                           <h4 className="font-medium text-sm">{group.name}</h4>
                                           {group.options?.length > 0 && (
                                             <ul className="mt-1 space-y-1">
-                                              {group.options.map((option: any, optIndex: number) => (
-                                                <li key={optIndex} className="text-xs text-gray-600 ml-2">
-                                                  • {option.name} {option.price && `(+$${option.price})`}
-                                                </li>
-                                              ))}
+                                              {group.options.map((option: any, optIndex: number) => {
+                                                // Handle both string arrays and object arrays
+                                                const optionName = typeof option === 'string' ? option : option.name;
+                                                const optionPrice = typeof option === 'object' ? option.price : null;
+
+                                                return (
+                                                  <li key={optIndex} className="text-xs text-gray-600 ml-2">
+                                                    • {optionName} {optionPrice && `(+$${optionPrice})`}
+                                                  </li>
+                                                );
+                                              })}
                                             </ul>
                                           )}
                                         </div>
@@ -712,34 +866,33 @@ function JobPageContent() {
 
                   {/* Extraction Section */}
                   <div className="space-y-3">
-                    {/* Extraction Button */}
+
+                    {/* Start Extraction Button */}
                     <button
-                      onClick={handleStartExtraction}
-                      disabled={!documents || documents.length === 0 || isProcessing}
+                      onClick={handleSimpleExtraction}
+                      disabled={!documents || documents.length === 0 || isProcessing || isSimpleProcessing}
                       className={`w-full py-3 px-4 rounded-lg font-medium transition-all relative overflow-hidden ${
-                        !documents || documents.length === 0 || isProcessing
+                        !documents || documents.length === 0 || isProcessing || isSimpleProcessing
                           ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                          : isExtractionComplete
-                          ? 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'
                           : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm hover:shadow-md'
                       }`}
                     >
-                      {isProcessing ? (
+                      {isSimpleProcessing ? (
                         <div className="flex items-center justify-center gap-2">
                           <div className="w-4 h-4 border-2 border-gray-300 border-t-white rounded-full animate-spin"></div>
                           <span>Processing...</span>
                         </div>
-                      ) : isExtractionComplete ? (
+                      ) : (
                         <div className="flex items-center justify-center gap-2">
                           <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M4 4h12v2H4zM4 9h12v2H4zM4 14h12v2H4z" />
+                            <path d="M5 3l14 9-14 9V3z" />
                           </svg>
-                          Retry Extraction ({extractionItemCount} items found)
+                          Start Extraction
                         </div>
-                      ) : (
-                        'Start Extraction'
                       )}
                     </button>
+
+
 
                     {/* Progress Bar - Only show during processing */}
                     {isProcessing && (
@@ -765,121 +918,7 @@ function JobPageContent() {
                     )}
                   </div>
 
-                  {/* Cost Estimate - Only show when not processing */}
-                  {documents && documents.length > 0 && !isProcessing && !isExtractionComplete && (
-                    <div className="mt-2 text-xs text-gray-500 text-center">
-                      Estimated cost: {formatCost(estimateExtractionCost(
-                        documents.length,
-                        Math.max(20, documents.length * 15), // Estimate 15-20 items per document
-                        documents.some(doc => doc.file_type?.startsWith('image/'))
-                      ))}
-                    </div>
-                  )}
 
-                  {/* Extraction Summary */}
-                  {isExtractionComplete && (
-                    <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                      <div className="text-sm text-green-800">
-                        <div className="font-medium mb-1">✅ 3-Phase Extraction Complete</div>
-                        <div className="text-xs text-green-600">
-                          Extracted {extractionItemCount} menu items • Results displayed in table
-                        </div>
-
-                        {/* NEW: 3-Phase Cost Breakdown */}
-                        {extractionResults?.data?.extractions && extractionResults.data.extractions.length > 0 && (
-                          <div className="mt-2 space-y-1">
-                            {/* Show latest extraction with phase breakdown if available */}
-                            {(() => {
-                              const latestExtraction = extractionResults.data.extractions[0];
-                              const hasPhaseBreakdown = latestExtractionData?.costBreakdown;
-
-                              return (
-                                <div className="space-y-1">
-                                  <div className="text-xs text-green-600 flex justify-between items-center">
-                                    <span>
-                                      <span className="font-medium">Latest Extraction:</span>{' '}
-                                      {latestExtractionData?.itemCount || latestExtraction.itemCount} items
-                                      {(latestExtractionData?.apiCalls || latestExtraction.apiCallsCount) && (
-                                        <span className="text-gray-500 ml-1">
-                                          ({latestExtractionData?.apiCalls || latestExtraction.apiCallsCount} API calls)
-                                        </span>
-                                      )}
-                                    </span>
-                                    <span className={getCostColor(latestExtractionData?.totalCost || latestExtraction.extractionCost || 0)}>
-                                      {formatCost(latestExtractionData?.totalCost || latestExtraction.extractionCost || 0)}
-                                    </span>
-                                  </div>
-
-                                  {/* Phase breakdown with real costs */}
-                                  <div className="text-xs text-green-500 mt-1 pl-2 border-l-2 border-green-300">
-                                    {hasPhaseBreakdown ? (
-                                      <div className="space-y-0.5">
-                                        <div className="flex justify-between">
-                                          <span>• Phase 1: Structure Analysis (Gemini Pro)</span>
-                                          <span className="text-green-600 font-mono">
-                                            {formatCost(latestExtractionData.costBreakdown.phase1)}
-                                          </span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span>• Phase 2: Item Extraction (Flash Models)</span>
-                                          <span className="text-green-600 font-mono">
-                                            {formatCost(latestExtractionData.costBreakdown.phase2)}
-                                          </span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                          <span>• Phase 3: Modifier Enrichment (Gemini Pro)</span>
-                                          <span className="text-green-600 font-mono">
-                                            {formatCost(latestExtractionData.costBreakdown.phase3)}
-                                          </span>
-                                        </div>
-                                        <div className="text-green-600 font-medium mt-1 pt-1 border-t border-green-300">
-                                          Real token costs tracked (no estimates)
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div>
-                                        <div>• Phase 1: Structure Analysis (Gemini Pro)</div>
-                                        <div>• Phase 2: Item Extraction (Flash Models)</div>
-                                        <div>• Phase 3: Modifier Enrichment (Gemini Pro)</div>
-                                        <div className="text-green-600 font-medium mt-1">
-                                          Real token costs tracked (no estimates)
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })()}
-
-                            {/* Multiple extractions total */}
-                            {extractionResults.data.extractions.length > 1 && (
-                              <div className="text-xs text-green-700 font-medium border-t pt-1 flex justify-between">
-                                <span>Total ({extractionResults.data.extractions.length} extractions):</span>
-                                <span className={getCostColor(
-                                  extractionResults.data.extractions.reduce((sum, ext) => sum + (ext.extractionCost || 0), 0)
-                                )}>
-                                  {formatCost(
-                                    extractionResults.data.extractions.reduce((sum, ext) => sum + (ext.extractionCost || 0), 0)
-                                  )}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {/* Temporary Debug Display */}
-                        {items.length > 0 && process.env.NODE_ENV === 'development' && (
-                          <details className="mt-2 text-xs">
-                            <summary className="cursor-pointer text-gray-500">Debug: Categories</summary>
-                            <div className="mt-1 p-2 bg-white rounded border text-xs">
-                              <div><strong>Categories found:</strong> {[...new Set(items.map(item => item.subcategory))].join(', ')}</div>
-                              <div><strong>Food tab items:</strong> {getItemsForTab('Food').length}</div>
-                              <div><strong>N/A tab items:</strong> {getItemsForTab('N/A + Mocktails').length}</div>
-                            </div>
-                          </details>
-                        )}
-                      </div>
-                    </div>
-                  )}
 
                   {/* File Previews */}
                   <FilePreviewPanel jobId={jobId} />

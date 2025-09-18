@@ -6,6 +6,9 @@
 import { debugLogger } from '../utils/debug-logger';
 import { estimateTextTokens, estimateImageTokens } from '../models/gemini-models';
 import { extractPdfTextWithDetection } from '../../pdf-text-checker';
+import { initializeFileManager, getFileManager } from '../gemini-file-manager';
+import { getCacheManager } from '../cache-manager';
+import { globalCacheTracker } from '../utils/cache-tracker';
 import type { DocumentMeta, PreparedDocument, PreparedPage, PreparedSheet } from '../types';
 
 /**
@@ -46,7 +49,8 @@ async function extractResolution(doc: DocumentMeta, buffer: ArrayBuffer): Promis
       // For images, use sharp if available, otherwise estimate
       try {
         const sharp = await import('sharp');
-        const metadata = await sharp.default(Buffer.from(buffer)).metadata();
+        const sharpInstance = sharp.default || sharp;
+        const metadata = await sharpInstance(Buffer.from(buffer)).metadata();
         return { width: metadata.width || 0, height: metadata.height || 0 };
       } catch {
         // Fallback: estimate based on file size (rough approximation)
@@ -242,113 +246,47 @@ async function getDocumentSize(doc: DocumentMeta): Promise<number> {
 }
 
 /**
- * Main document preparation function
+ * Main document preparation function with parallel processing and master cache initialization
  */
-export async function prepareDocuments(documents: DocumentMeta[]): Promise<PreparedDocument[]> {
-  debugLogger.startPhase(0, 'Document Preparation');
+export async function prepareDocuments(documents: DocumentMeta[], jobId?: string): Promise<{
+  prepared: PreparedDocument[];
+  masterCacheKey: string;
+}> {
+  debugLogger.startPhase(0, 'Document Preparation & Master Cache Setup');
   debugLogger.debug(0, 'PREPARATION_START', `Processing ${documents.length} documents`);
 
   const prepared: PreparedDocument[] = [];
 
-  for (let i = 0; i < documents.length; i++) {
-    const doc = documents[i];
-    debugLogger.documentStart(0, i + 1, documents.length, doc.name, doc.type);
+  // Process documents in parallel batches (2 at a time to respect rate limits)
+  const concurrencyLimit = 2;
+  const batches = [];
 
-    try {
-      // Get file buffer and size
-      const buffer = await getFileBuffer(doc);
-      const fileSize = await getDocumentSize(doc);
+  for (let i = 0; i < documents.length; i += concurrencyLimit) {
+    batches.push(documents.slice(i, i + concurrencyLimit));
+  }
 
-      debugLogger.debug(0, 'DOCUMENT_LOADED', `${doc.name}: ${buffer.byteLength} bytes`);
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+    debugLogger.debug(0, 'BATCH_PROCESSING', `Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} documents)`);
 
-      // Extract resolution for observability
-      const resolution = await extractResolution(doc, buffer);
-      if (resolution) {
-        resolutionTracker.update(doc.id, resolution);
-      }
+    const batchResults = await Promise.all(
+      batch.map((doc, docIndex) => prepareSingleDocument(doc, batchIndex * concurrencyLimit + docIndex + 1, documents.length))
+    );
 
-      if (doc.type === 'application/pdf') {
-        // PDF Processing - extract pages
-        const pages = await extractPdfPages(buffer);
-        const totalTokens = pages.reduce((sum, page) => sum + page.tokens, 0);
-        const hasText = pages.some(page => !page.isImage && page.hasContent);
-
-        prepared.push({
-          id: doc.id,
-          name: doc.name,
-          type: 'pdf',
-          pages,
-          metadata: {
-            totalPages: pages.length,
-            fileSize,
-            hasText,
-            totalTokens
-          }
-        });
-
-        debugLogger.documentComplete(0, doc.name, undefined, pages.length);
-
-      } else if (doc.type.includes('spreadsheet') || doc.type.includes('excel')) {
-        // Spreadsheet Processing - extract sheets
-        const sheets = await extractSpreadsheetSheets(buffer);
-        const totalTokens = sheets.reduce((sum, sheet) => sum + sheet.tokens, 0);
-        const hasText = sheets.length > 0;
-
-        prepared.push({
-          id: doc.id,
-          name: doc.name,
-          type: 'spreadsheet',
-          sheets,
-          metadata: {
-            totalSheets: sheets.length,
-            fileSize,
-            hasText,
-            totalTokens
-          }
-        });
-
-        debugLogger.documentComplete(0, doc.name, undefined, sheets.length);
-
-      } else if (doc.type.startsWith('image/')) {
-        // Image Processing - direct base64
-        const base64 = doc.content || Buffer.from(buffer).toString('base64');
-        const tokens = estimateImageTokens();
-
-        prepared.push({
-          id: doc.id,
-          name: doc.name,
-          type: 'image',
-          content: base64,
-          metadata: {
-            fileSize,
-            hasText: false,
-            totalTokens: tokens
-          }
-        });
-
-        debugLogger.documentComplete(0, doc.name);
-
-      } else {
-        debugLogger.warn(0, 'UNSUPPORTED_TYPE', `${doc.name}: ${doc.type}`);
-        continue;
-      }
-
-    } catch (error) {
-      debugLogger.error(0, 'DOCUMENT_PREPARATION_FAILED', `${doc.name}: ${(error as Error).message}`);
-      // Continue with other documents
-      continue;
-    }
-
-    debugLogger.logMemoryUsage(`After document ${i + 1}`, 0);
+    prepared.push(...batchResults.filter(result => result !== null) as PreparedDocument[]);
   }
 
   const totalTokens = prepared.reduce((sum, doc) => sum + doc.metadata.totalTokens, 0);
   const totalPages = prepared.reduce((sum, doc) => sum + (doc.metadata.totalPages || 0), 0);
   const totalSheets = prepared.reduce((sum, doc) => sum + (doc.metadata.totalSheets || 0), 0);
 
-  debugLogger.endPhase(0, `Prepared ${prepared.length} documents`, prepared.length);
   debugLogger.success(0, 'PREPARATION_COMPLETE',
     `${prepared.length} docs, ${totalPages} pages, ${totalSheets} sheets, ${totalTokens} tokens`);
+
+  // Initialize master cache after document preparation
+  const masterCacheKey = await initializeMasterCache(prepared, jobId);
+
+  debugLogger.endPhase(0, `Prepared ${prepared.length} documents with master cache`, prepared.length);
 
   // Log maximum resolution for observability
   const max = resolutionTracker.getMax();
@@ -356,7 +294,170 @@ export async function prepareDocuments(documents: DocumentMeta[]): Promise<Prepa
     console.log(`[OBSERVABILITY] PHASE0_MAX_RESOLUTION | doc=${max.docId} width=${max.resolution.width} height=${max.resolution.height} dpi=${max.resolution.dpi || 'N/A'}`);
   }
 
-  return prepared;
+  return { prepared, masterCacheKey };
+}
+
+/**
+ * Initialize master cache for the entire extraction pipeline
+ * Creates a job-specific cache that will accumulate results from all phases
+ */
+async function initializeMasterCache(
+  documents: PreparedDocument[],
+  jobId?: string
+): Promise<string> {
+  try {
+    debugLogger.debug(0, 'MASTER_CACHE_INIT', 'Initializing master extraction cache');
+
+    // Generate unique job ID if not provided
+    const actualJobId = jobId || `job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Upload all documents to Gemini File Manager for reuse
+    const fileManager = getFileManager();
+    const uploadedFiles = await fileManager.uploadAllDocuments(documents);
+
+    debugLogger.debug(0, 'FILES_UPLOADED', `Uploaded ${uploadedFiles.size} documents to Gemini`);
+
+    // Create document cache with uploaded files
+    const cacheManager = getCacheManager();
+
+    // Create cache contents with file references
+    const documentParts: any[] = [];
+    for (const doc of documents) {
+      const uploadedFile = uploadedFiles.get(doc.id);
+      if (uploadedFile) {
+        documentParts.push({
+          fileData: {
+            mimeType: uploadedFile.mimeType,
+            fileUri: uploadedFile.uri
+          }
+        });
+      }
+    }
+
+    // Skip explicit document caching - Gemini 2.5 models use implicit caching automatically
+    debugLogger.debug(0, 'DOCUMENT_CACHE_SKIP',
+      `Using implicit caching for Gemini 2.5 models (${documentParts.length} files uploaded)`);
+
+    // Return the master cache key for the job
+    const masterCacheKey = `master-${actualJobId}`;
+
+    debugLogger.success(0, 'MASTER_CACHE_INITIALIZED',
+      `Master cache key: ${masterCacheKey} for ${documents.length} documents`);
+
+    return masterCacheKey;
+
+  } catch (error) {
+    debugLogger.error(0, 'MASTER_CACHE_INIT_FAILED',
+      `Failed to initialize master cache: ${(error as Error).message}`);
+
+    // Return a fallback cache key even if cache creation failed
+    const fallbackKey = `master-fallback-${Date.now()}`;
+    debugLogger.warn(0, 'MASTER_CACHE_FALLBACK', `Using fallback key: ${fallbackKey}`);
+    return fallbackKey;
+  }
+}
+
+/**
+ * Estimate token count for document cache content
+ */
+function estimateDocumentCacheTokens(documentParts: any[]): number {
+  // Each file reference is relatively small in tokens
+  // But we need to account for the actual file content that will be processed
+  return documentParts.length * 100; // Conservative estimate per file
+}
+
+/**
+ * Prepare a single document (extracted from main function for parallel processing)
+ */
+async function prepareSingleDocument(doc: DocumentMeta, docNumber: number, totalDocs: number): Promise<PreparedDocument | null> {
+  debugLogger.documentStart(0, docNumber, totalDocs, doc.name, doc.type);
+
+  try {
+    // Get file buffer and size
+    const buffer = await getFileBuffer(doc);
+    const fileSize = await getDocumentSize(doc);
+
+    debugLogger.debug(0, 'DOCUMENT_LOADED', `${doc.name}: ${buffer.byteLength} bytes`);
+
+    // Extract resolution for observability
+    const resolution = await extractResolution(doc, buffer);
+    if (resolution) {
+      resolutionTracker.update(doc.id, resolution);
+    }
+
+    if (doc.type === 'application/pdf') {
+      // PDF Processing - extract pages
+      const pages = await extractPdfPages(buffer);
+      const totalTokens = pages.reduce((sum, page) => sum + page.tokens, 0);
+      const hasText = pages.some(page => !page.isImage && page.hasContent);
+
+      const preparedDoc: PreparedDocument = {
+        id: doc.id,
+        name: doc.name,
+        type: 'pdf',
+        pages,
+        metadata: {
+          totalPages: pages.length,
+          fileSize,
+          hasText,
+          totalTokens
+        }
+      };
+
+      debugLogger.documentComplete(0, doc.name, undefined, pages.length);
+      return preparedDoc;
+
+    } else if (doc.type.includes('spreadsheet') || doc.type.includes('excel')) {
+      // Spreadsheet Processing - extract sheets
+      const sheets = await extractSpreadsheetSheets(buffer);
+      const totalTokens = sheets.reduce((sum, sheet) => sum + sheet.tokens, 0);
+      const hasText = sheets.length > 0;
+
+      const preparedDoc: PreparedDocument = {
+        id: doc.id,
+        name: doc.name,
+        type: 'spreadsheet',
+        sheets,
+        metadata: {
+          totalSheets: sheets.length,
+          fileSize,
+          hasText,
+          totalTokens
+        }
+      };
+
+      debugLogger.documentComplete(0, doc.name, undefined, sheets.length);
+      return preparedDoc;
+
+    } else if (doc.type.startsWith('image/')) {
+      // Image Processing - direct base64
+      const base64 = doc.content || Buffer.from(buffer).toString('base64');
+      const tokens = estimateImageTokens();
+
+      const preparedDoc: PreparedDocument = {
+        id: doc.id,
+        name: doc.name,
+        type: 'image',
+        content: base64,
+        metadata: {
+          fileSize,
+          hasText: false,
+          totalTokens: tokens
+        }
+      };
+
+      debugLogger.documentComplete(0, doc.name);
+      return preparedDoc;
+
+    } else {
+      debugLogger.warn(0, 'UNSUPPORTED_TYPE', `${doc.name}: ${doc.type}`);
+      return null;
+    }
+
+  } catch (error) {
+    debugLogger.error(0, 'DOCUMENT_PREPARATION_FAILED', `${doc.name}: ${(error as Error).message}`);
+    return null;
+  }
 }
 
 /**

@@ -2,6 +2,7 @@
 
 import { createClient } from './supabase-browser';
 import { v4 as uuidv4 } from 'uuid';
+import type { Database } from '@/types/database';
 
 export interface UploadResult {
   success: boolean;
@@ -67,11 +68,37 @@ export class StorageService {
    * Generate unique file path for storage
    */
   static generateFilePath(jobId: string, fileName: string): string {
+    // Validate inputs
+    if (!jobId || typeof jobId !== 'string' || jobId.trim() === '') {
+      throw new Error('Invalid job ID provided');
+    }
+
+    if (!fileName || typeof fileName !== 'string' || fileName.trim() === '') {
+      throw new Error('Invalid file name provided');
+    }
+
     const uuid = uuidv4();
     const extension = fileName.split('.').pop();
+
+    // Validate extension
+    if (!extension || extension.length > 10) {
+      throw new Error('Invalid file extension');
+    }
+
     const baseName = fileName.replace(/\.[^/.]+$/, ""); // Remove extension
     const sanitizedName = baseName.replace(/[^a-zA-Z0-9_-]/g, '_'); // Sanitize filename
-    return `jobs/${jobId}/${uuid}_${sanitizedName}.${extension}`;
+
+    // Ensure sanitized name is not empty
+    const finalName = sanitizedName || 'file';
+
+    const filePath = `jobs/${jobId}/${uuid}_${finalName}.${extension}`;
+
+    // Validate final path format
+    if (filePath.length > 1000) {
+      throw new Error('Generated file path is too long');
+    }
+
+    return filePath;
   }
 
   /**

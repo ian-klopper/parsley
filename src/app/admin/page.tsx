@@ -4,6 +4,18 @@ import {
   Avatar,
   AvatarFallback,
 } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { getUserColor } from "@/lib/theme-utils"
 import {
   Table,
@@ -30,6 +42,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { UserService } from "@/lib/user-service"
 import { User } from "@/types/database"
 import { useToast } from "@/hooks/use-toast"
+import { Trash2, AlertTriangle } from "lucide-react"
 
 
 
@@ -42,6 +55,7 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
+  const [purging, setPurging] = useState(false);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -99,6 +113,42 @@ export default function AdminPage() {
         description: "Failed to update user color: " + error,
         variant: "destructive",
       });
+    }
+  };
+
+  const handlePurgeDatabase = async () => {
+    setPurging(true);
+
+    try {
+      const response = await fetch('/api/admin/purge-database', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast({
+          title: "Database Purged",
+          description: `Successfully deleted ${result.summary.totalRecordsDeleted} records from ${result.summary.totalTablesProcessed} tables. ${result.usersPreserved} users preserved.`,
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to purge database: " + result.error,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to purge database: " + (error instanceof Error ? error.message : 'Unknown error'),
+        variant: "destructive",
+      });
+    } finally {
+      setPurging(false);
     }
   };
 
@@ -173,6 +223,85 @@ export default function AdminPage() {
                   </TableBody>
                 </Table>
               )}
+
+              {/* Dangerous Actions Section */}
+              <div className="mt-12 border-t pt-8">
+                <div className="mb-6">
+                  <h2 className="text-lg font-semibold flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-5 w-5" />
+                    Dangerous Actions
+                  </h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    These actions cannot be undone. Use with extreme caution.
+                  </p>
+                </div>
+
+                <div className="bg-destructive/5 border border-destructive/20 rounded-lg p-6">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h3 className="font-medium text-destructive mb-2">Purge Database</h3>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        Delete ALL data from the database including jobs, extractions, menu items, and activity logs.
+                        <strong className="text-foreground"> User accounts will be preserved.</strong>
+                      </p>
+                      <div className="text-xs text-muted-foreground space-y-1">
+                        <div>• All extraction jobs and results will be deleted</div>
+                        <div>• All menu items and related data will be deleted</div>
+                        <div>• All activity logs will be deleted</div>
+                        <div>• User accounts and settings will remain intact</div>
+                      </div>
+                    </div>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={purging}
+                          className="ml-4 flex items-center gap-2"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          {purging ? 'Purging...' : 'Purge Database'}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+                            <AlertTriangle className="h-5 w-5" />
+                            Purge Database
+                          </AlertDialogTitle>
+                          <AlertDialogDescription className="space-y-3">
+                            <p>
+                              <strong>This action cannot be undone.</strong> You are about to delete ALL data from the database except user accounts.
+                            </p>
+                            <div className="bg-muted p-3 rounded text-sm">
+                              <div className="font-medium mb-2">The following will be permanently deleted:</div>
+                              <ul className="space-y-1 text-xs">
+                                <li>• All extraction jobs and results</li>
+                                <li>• All menu items, sizes, and modifiers</li>
+                                <li>• All activity logs</li>
+                                <li>• All storage files and data</li>
+                              </ul>
+                            </div>
+                            <p className="text-green-600 font-medium">
+                              ✓ User accounts and settings will be preserved
+                            </p>
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={handlePurgeDatabase}
+                            disabled={purging}
+                            className="bg-destructive hover:bg-destructive/90"
+                          >
+                            {purging ? 'Purging Database...' : 'Yes, Purge Database'}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
+              </div>
         </div>
       </PageLayout>
     </AccessControl>

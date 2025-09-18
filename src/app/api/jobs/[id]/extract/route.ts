@@ -180,13 +180,12 @@ async function saveExtractedItems(
 
 export async function GET(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await requireNonPending(request);
     const supabase = await createSupabaseServer();
-    const params = await context.params;
-    const jobId = params.id;
+    const { id: jobId } = await params;
 
     // Get job details to verify access
     const { data: job, error: jobError } = await supabase
@@ -225,23 +224,9 @@ export async function GET(
       return Response.json({ error: 'Failed to fetch extractions' }, { status: 500 });
     }
 
-    if (!allExtractions || allExtractions.length === 0) {
-      return Response.json({
-        success: true,
-        data: {
-          items: [],
-          hasResults: false,
-          extractions: []
-        }
-      });
-    }
-
-    // Use the latest extraction for menu items
-    const latestExtraction = allExtractions[0];
-
-    // Fetch menu items with their sizes and modifiers
-    console.log(`🔍 GET: Fetching menu items for job ${jobId}, extraction ${latestExtraction.id}`);
-    const { data: menuItems, error: menuItemsError } = await supabase
+    // Check for menu items regardless of whether there are extraction_results
+    // This handles both full extractions (with extraction_id) and simple extractions (with null extraction_id)
+    let menuItemsQuery = supabase
       .from('menu_items')
       .select(`
         id,
@@ -261,8 +246,20 @@ export async function GET(
           options
         )
       `)
-      .eq('job_id', jobId)
-      .eq('extraction_id', latestExtraction.id);
+      .eq('job_id', jobId);
+
+    // If we have extraction results, use the latest one
+    // Otherwise, query for items with null extraction_id (simple extractions)
+    if (allExtractions && allExtractions.length > 0) {
+      const latestExtraction = allExtractions[0];
+      menuItemsQuery = menuItemsQuery.eq('extraction_id', latestExtraction.id);
+      console.log(`🔍 GET: Fetching menu items for job ${jobId}, extraction ${latestExtraction.id}`);
+    } else {
+      menuItemsQuery = menuItemsQuery.is('extraction_id', null);
+      console.log(`🔍 GET: Fetching menu items for job ${jobId}, simple extraction (null extraction_id)`);
+    }
+
+    const { data: menuItems, error: menuItemsError } = await menuItemsQuery;
 
     console.log(`📊 GET: Found ${menuItems?.length || 0} menu items`);
 
@@ -272,6 +269,18 @@ export async function GET(
         success: false,
         error: 'Failed to fetch extraction results'
       }, { status: 500 });
+    }
+
+    // If no menu items found at all, return empty results
+    if (!menuItems || menuItems.length === 0) {
+      return Response.json({
+        success: true,
+        data: {
+          items: [],
+          hasResults: false,
+          extractions: allExtractions || []
+        }
+      });
     }
 
     // Transform to legacy format for backward compatibility
@@ -328,6 +337,26 @@ export async function GET(
               console.warn('Failed to parse modifier options:', options);
               options = [];
             }
+          }
+
+          // Migrate legacy string arrays to structured format
+          if (Array.isArray(options) && options.length > 0 && typeof options[0] === 'string') {
+            options = options.map((option: string) => {
+              // Look for price patterns: "+$4", "(+$2.50)", "($3)", etc.
+              const priceMatch = option.match(/[\(+]?\+?\$?([\d.]+)\)?/);
+
+              if (priceMatch) {
+                const price = priceMatch[1];
+                const name = option.replace(/[\(+]?\+?\$?[\d.]+\)?/g, '').trim();
+                return {
+                  name: name || option, // Fallback to full string if name becomes empty
+                  price: price
+                };
+              }
+
+              // No price found, just return the name
+              return { name: option.trim() };
+            });
           }
 
           if (!modifierMap.has(groupName)) {
@@ -421,13 +450,12 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await requireNonPending(request);
     const supabase = await createSupabaseServer();
-    const params = await context.params;
-    const jobId = params.id;
+    const { id: jobId } = await params;
 
     console.log(`\n🚀 Starting 3-Phase Extraction for job ${jobId}`);
 
@@ -489,27 +517,77 @@ export async function POST(
     }
 
     // Download document content and convert to DocumentMeta format
-    const documentMetas: DocumentMeta[] = await Promise.all(
-      documents.map(async (doc) => {
+    const documentMetas: DocumentMeta[] = [];
+    const failedDownloads: string[] = [];
+
+    for (const doc of documents) {
+      try {
+        // Validate storage path before attempting download
+        if (!doc.storage_path || typeof doc.storage_path !== 'string' || doc.storage_path.trim() === '') {
+          console.warn(`Invalid storage path for document ${doc.file_name}: ${doc.storage_path}`);
+          failedDownloads.push(`${doc.file_name}: Invalid storage path`);
+          continue;
+        }
+
         const { data, error } = await supabase.storage
           .from('job-documents')
           .download(doc.storage_path);
 
         if (error) {
-          throw new Error(`Failed to download document ${doc.file_name}: ${error.message}`);
+          console.error(`Failed to download document ${doc.file_name}:`, error);
+          failedDownloads.push(`${doc.file_name}: ${error.message}`);
+          continue;
+        }
+
+        if (!data) {
+          console.error(`No data received for document ${doc.file_name}`);
+          failedDownloads.push(`${doc.file_name}: No data received`);
+          continue;
         }
 
         const buffer = await data.arrayBuffer();
         const base64 = Buffer.from(buffer).toString('base64');
 
-        return {
+        documentMetas.push({
           id: doc.id,
           name: doc.file_name,
           type: doc.file_type,
           content: base64
-        };
-      })
-    );
+        });
+      } catch (downloadError) {
+        console.error(`Unexpected error downloading ${doc.file_name}:`, downloadError);
+        failedDownloads.push(`${doc.file_name}: ${downloadError instanceof Error ? downloadError.message : 'Unknown error'}`);
+      }
+    }
+
+    // Log failed downloads
+    if (failedDownloads.length > 0) {
+      console.warn(`Failed to download ${failedDownloads.length} out of ${documents.length} documents:`, failedDownloads);
+    }
+
+    // Check if we have any successful downloads
+    if (documentMetas.length === 0) {
+      const errorMessage = `Failed to download any documents. Errors: ${failedDownloads.join(', ')}`;
+      console.error(errorMessage);
+
+      await ActivityLogger.logJobActivity(
+        user.id,
+        'job.extraction_failed',
+        jobId,
+        {
+          description: `Document download failed for "${job.venue}". ${failedDownloads.length} documents could not be downloaded.`,
+          error: errorMessage,
+          failed_documents: failedDownloads,
+          job_venue: job.venue,
+          job_number: job.job_id
+        }
+      );
+
+      return Response.json(
+        { error: 'Failed to download documents from storage. Please try re-uploading the files.' },
+        { status: 500 }
+      );
+    }
 
     // Validate documents before processing
     const validation = validateDocuments(documentMetas);
@@ -707,13 +785,13 @@ export async function POST(
 
     // Try to log the error
     try {
-      const params = await context.params;
-      if (params.id) {
+      const { id: jobId } = await params;
+      if (jobId) {
         const user = await requireNonPending(request);
         await ActivityLogger.logJobActivity(
           user.id,
           'job.extraction_error',
-          params.id,
+          jobId,
           {
             description: `Unexpected system error during 3-phase extraction: ${error instanceof Error ? error.message : 'Unknown error'}`,
             error: error instanceof Error ? error.message : 'Unknown system error',

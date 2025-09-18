@@ -186,11 +186,12 @@ export default function DashboardOptimized() {
   // Show loading state with tips
   if (!mounted || jobsLoading || usersLoading) {
     return <LoadingWithTips />;
+  }
 
   // Show error state
   if (jobsError) {
     return (
-      <PageLayout>
+      <PageLayout title="Dashboard">
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <p className="text-destructive">Error loading dashboard</p>
@@ -207,7 +208,7 @@ export default function DashboardOptimized() {
   }
 
   return (
-    <PageLayout>
+    <PageLayout title="Dashboard">
       <ResizablePanelGroup direction="horizontal" className="h-screen w-full">
         <ResizablePanel defaultSize={75} minSize={50}>
           <div className="p-4 h-full">
@@ -286,7 +287,7 @@ export default function DashboardOptimized() {
                               <Avatar className="w-6 h-6">
                                 <AvatarFallback
                                   className="text-xs"
-                                  style={{ backgroundColor: getUserColor(creator.color_index || 0) }}
+                                  style={getUserColor(creator, theme, mounted)}
                                 >
                                   {creator.initials}
                                 </AvatarFallback>
@@ -299,7 +300,7 @@ export default function DashboardOptimized() {
                               <Avatar className="w-6 h-6">
                                 <AvatarFallback
                                   className="text-xs"
-                                  style={{ backgroundColor: getUserColor(owner.color_index || 0) }}
+                                  style={getUserColor(owner, theme, mounted)}
                                 >
                                   {owner.initials}
                                 </AvatarFallback>
@@ -314,7 +315,7 @@ export default function DashboardOptimized() {
                                 <Avatar key={collaborator.id} className="w-6 h-6">
                                   <AvatarFallback
                                     className="text-xs"
-                                    style={{ backgroundColor: getUserColor(collaborator.color_index || 0) }}
+                                    style={getUserColor(collaborator, theme, mounted)}
                                   >
                                     {collaborator.initials}
                                   </AvatarFallback>
@@ -379,85 +380,6 @@ export default function DashboardOptimized() {
           </div>
         </ResizablePanel>
 
-        <ResizableHandle withHandle />
-
-        <ResizablePanel defaultSize={25} minSize={20}>
-          <div className="p-4 border-l h-full">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-medium">Team</h2>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                >
-                  {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm">
-                      <UserCog className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {userProfile?.role === 'admin' && (
-                      <DropdownMenuItem onClick={() => router.push('/admin')}>
-                        <LayoutDashboard className="w-4 h-4 mr-2" />
-                        Admin Panel
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem onClick={() => router.push('/logs')}>
-                      <FileText className="w-4 h-4 mr-2" />
-                      Activity Logs
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleSignOut}>
-                      <LogOut className="w-4 h-4 mr-2" />
-                      Sign Out
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
-
-            <ScrollArea className="h-[calc(100vh-120px)]">
-              <div className="space-y-2">
-                {users.filter(u => u.role === 'admin').map((admin) => (
-                  <div key={admin.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/50">
-                    <Avatar className="w-8 h-8">
-                      <AvatarFallback
-                        style={{ backgroundColor: getUserColor(admin.color_index || 0) }}
-                      >
-                        {admin.initials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1">
-                        <p className="text-sm font-medium truncate">{admin.full_name || admin.email}</p>
-                        <Crown className="w-3 h-3 text-yellow-500 flex-shrink-0" />
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate">{admin.email}</p>
-                    </div>
-                  </div>
-                ))}
-                {users.filter(u => u.role === 'user').map((member) => (
-                  <div key={member.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50">
-                    <Avatar className="w-8 h-8">
-                      <AvatarFallback
-                        style={{ backgroundColor: getUserColor(member.color_index || 0) }}
-                      >
-                        {member.initials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{member.full_name || member.email}</p>
-                      <p className="text-xs text-muted-foreground truncate">{member.email}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
-          </div>
-        </ResizablePanel>
       </ResizablePanelGroup>
 
       {/* Create Job Dialog */}
@@ -504,7 +426,7 @@ export default function DashboardOptimized() {
                     <Avatar className="w-6 h-6">
                       <AvatarFallback
                         className="text-xs"
-                        style={{ backgroundColor: getUserColor(user.color_index || 0) }}
+                        style={getUserColor(user, theme, mounted)}
                       >
                         {user.initials}
                       </AvatarFallback>
@@ -536,7 +458,7 @@ export default function DashboardOptimized() {
                     <Avatar className="w-6 h-6">
                       <AvatarFallback
                         className="text-xs"
-                        style={{ backgroundColor: getUserColor(user.color_index || 0) }}
+                        style={getUserColor(user, theme, mounted)}
                       >
                         {user.initials}
                       </AvatarFallback>

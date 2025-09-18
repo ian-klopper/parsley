@@ -3,6 +3,10 @@
  * Coordinates all phases and provides comprehensive debug output
  */
 
+// Load environment variables for API keys
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+
 import { debugLogger } from './utils/debug-logger';
 import { RealTokenTracker } from './utils/token-tracker';
 import { prepareDocuments } from './phases/phase0-preparation';
@@ -10,6 +14,9 @@ import { analyzeMenuStructure, validateStructure } from './phases/phase1-structu
 import { extractMenuItems, validateExtraction } from './phases/phase2-extraction';
 import { enrichMenuItems, validateEnrichment } from './phases/phase3-enrichment';
 import { estimateTextTokens } from './models/gemini-models';
+import { initializeFileManager } from './gemini-file-manager';
+import { initializeCacheManager } from './cache-manager';
+import { globalCacheTracker } from './utils/cache-tracker';
 import type { DocumentMeta, ExtractionResult } from './types';
 
 /**
@@ -43,6 +50,14 @@ export async function extractMenu(documents: DocumentMeta[]): Promise<Extraction
   const startTime = Date.now();
   const tokenTracker = new RealTokenTracker();
 
+  // Initialize file manager and cache manager for cost optimization
+  const geminiApiKey = process.env.GOOGLE_AI_API_KEY;
+  if (!geminiApiKey) {
+    throw new Error('GOOGLE_AI_API_KEY environment variable is required for file uploads');
+  }
+  initializeFileManager(geminiApiKey);
+  initializeCacheManager(geminiApiKey);
+
   // Clear previous logs and start fresh
   debugLogger.clearLogs();
 
@@ -52,16 +67,18 @@ export async function extractMenu(documents: DocumentMeta[]): Promise<Extraction
     debugLogger.extractionStart(documents.length, estimatedCost);
     debugLogger.logMemoryUsage('Extraction start');
 
-    // Phase 0: Document Preparation
-    debugLogger.debug(0, 'EXTRACTION_PIPELINE_START', '3-Phase Menu Extraction Pipeline');
-    const preparedDocuments = await prepareDocuments(documents);
+    // Phase 0: Document Preparation & Master Cache Setup
+    debugLogger.debug(0, 'EXTRACTION_PIPELINE_START', '3-Phase Menu Extraction Pipeline with Master Caching');
+    const { prepared: preparedDocuments, masterCacheKey } = await prepareDocuments(documents);
 
     if (preparedDocuments.length === 0) {
       throw new Error('No documents could be prepared for extraction');
     }
 
+    debugLogger.debug(0, 'MASTER_CACHE_READY', `Master cache initialized: ${masterCacheKey}`);
+
     // Phase 1: Menu Structure Analysis (Gemini Pro)
-    const structure = await analyzeMenuStructure(preparedDocuments, tokenTracker);
+    const structure = await analyzeMenuStructure(preparedDocuments, tokenTracker, masterCacheKey);
     const structureValidation = validateStructure(structure);
 
     if (!structureValidation.isValid) {
@@ -69,7 +86,7 @@ export async function extractMenu(documents: DocumentMeta[]): Promise<Extraction
     }
 
     // Phase 2: Item Extraction (Flash Models)
-    const rawItems = await extractMenuItems(structure, preparedDocuments, tokenTracker);
+    const rawItems = await extractMenuItems(structure, preparedDocuments, tokenTracker, masterCacheKey);
     const extractionValidation = validateExtraction(rawItems, structure);
 
     if (!extractionValidation.isValid) {
@@ -77,7 +94,7 @@ export async function extractMenu(documents: DocumentMeta[]): Promise<Extraction
     }
 
     // Phase 3: Modifier and Size Enrichment (Gemini Pro)
-    const finalItems = await enrichMenuItems(rawItems, preparedDocuments, tokenTracker);
+    const finalItems = await enrichMenuItems(rawItems, preparedDocuments, tokenTracker, masterCacheKey);
     const enrichmentValidation = validateEnrichment(finalItems);
 
     if (!enrichmentValidation.isValid) {
@@ -116,6 +133,12 @@ export async function extractMenu(documents: DocumentMeta[]): Promise<Extraction
     console.log(`TOTAL:               ${costs.totalCalls} calls, ${costs.totalTokens.input}/${costs.totalTokens.output} tokens, $${costs.total.toFixed(6)}`);
     console.log(`Cost per item:       $${tokenTracker.getCostPerItem(finalItems.length).toFixed(6)}`);
     console.log('===============================\n');
+
+    // Print cache performance report
+    globalCacheTracker.printReport();
+
+    // FINAL VALIDATION: Ensure mixed content was properly extracted
+    validateMixedContentExtraction(documents, finalItems);
 
     // Return successful result
     return {
@@ -217,6 +240,57 @@ export function validateDocuments(documents: DocumentMeta[]): { isValid: boolean
     isValid: errors.length === 0,
     errors
   };
+}
+
+/**
+ * Validate that mixed content (spreadsheets + images) was properly extracted
+ */
+function validateMixedContentExtraction(documents: DocumentMeta[], finalItems: any[]): void {
+  const fileTypes = {
+    images: documents.filter(doc => doc.type.startsWith('image/')),
+    spreadsheets: documents.filter(doc => doc.type.includes('spreadsheet') || doc.type.includes('excel')),
+    pdfs: documents.filter(doc => doc.type === 'application/pdf')
+  };
+
+  const totalFiles = fileTypes.images.length + fileTypes.spreadsheets.length + fileTypes.pdfs.length;
+
+  console.log('\n=== MIXED CONTENT EXTRACTION VALIDATION ===');
+  console.log(`📁 Input Files: ${fileTypes.images.length} images, ${fileTypes.spreadsheets.length} spreadsheets, ${fileTypes.pdfs.length} PDFs`);
+  console.log(`📊 Total Extracted Items: ${finalItems.length}`);
+
+  // Count items by source type (this is a heuristic since sourceRef might not be perfectly tracked)
+  const itemsSummary: any = {};
+
+  for (const item of finalItems) {
+    const sourceDoc = documents.find(doc => doc.id === item.sourceRef?.documentId);
+    if (sourceDoc) {
+      const sourceType = sourceDoc.type.startsWith('image/') ? 'image' :
+                        sourceDoc.type.includes('spreadsheet') || sourceDoc.type.includes('excel') ? 'spreadsheet' :
+                        sourceDoc.type === 'application/pdf' ? 'pdf' : 'unknown';
+
+      itemsSummary[sourceType] = (itemsSummary[sourceType] || 0) + 1;
+    }
+  }
+
+  console.log(`📊 Items by Source: ${Object.entries(itemsSummary).map(([type, count]) => `${type}: ${count}`).join(', ')}`);
+
+  // Critical validation: If multiple file types uploaded, ensure multiple types contributed
+  if (totalFiles > 1) {
+    const contributingTypes = Object.keys(itemsSummary).length;
+
+    if (contributingTypes === 1 && totalFiles > 1) {
+      console.log(`🚨 MIXED CONTENT ISSUE: ${totalFiles} different file types uploaded but only 1 type contributed to extraction`);
+
+      if (fileTypes.spreadsheets.length > 0 && !itemsSummary.spreadsheet) {
+        console.log(`🚨 SPREADSHEET ISSUE: ${fileTypes.spreadsheets.length} spreadsheet(s) uploaded but no items extracted from them:`);
+        fileTypes.spreadsheets.forEach(sheet => console.log(`   - ${sheet.name}`));
+      }
+    } else {
+      console.log(`✅ MIXED CONTENT SUCCESS: ${contributingTypes} different file types contributed to extraction`);
+    }
+  }
+
+  console.log('============================================\n');
 }
 
 /**

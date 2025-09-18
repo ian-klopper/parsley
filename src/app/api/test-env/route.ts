@@ -41,7 +41,7 @@ export async function GET(request: Request) {
     console.log('Environment Variables Check:', envCheck)
 
     // Test Supabase connection with anon key (normal client)
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const supabase = createClient(cookieStore)
 
     const { data: session, error: sessionError } = await supabase.auth.getSession()

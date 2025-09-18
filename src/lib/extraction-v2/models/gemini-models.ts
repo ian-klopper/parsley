@@ -43,33 +43,58 @@ export const RATE_LIMITS = {
   }
 };
 
-// Initialize Google AI SDK
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
+// Lazy initialization of Google AI SDK and models
+let genAI: GoogleGenerativeAI | null = null;
+let _models: {
+  pro: any;
+  flash: any;
+  flashLite: any;
+} | null = null;
 
-// Initialize models with direct SDK
-export const models = {
-  pro: genAI.getGenerativeModel({
-    model: 'gemini-2.5-pro',
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 8000,  // Increased for Pro model
-    }
-  }),
-  flash: genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 8000,
-    }
-  }),
-  flashLite: genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash-lite',
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 8000,
-    }
-  })
-};
+function initializeModels(): { pro: any; flash: any; flashLite: any } {
+  if (_models) return _models;
+
+  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GOOGLE_AI_API_KEY environment variable is required');
+  }
+
+  genAI = new GoogleGenerativeAI(apiKey);
+
+  _models = {
+    pro: genAI.getGenerativeModel({
+      model: 'gemini-2.5-pro',
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8000,  // Increased for Pro model
+      }
+    }),
+    flash: genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8000,
+      }
+    }),
+    flashLite: genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash',  // Use flash since flash-lite might not support caching
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8000,
+      }
+    })
+  };
+
+  return _models;
+}
+
+// Export models with lazy initialization
+export const models = new Proxy({} as any, {
+  get(target, prop) {
+    const initialized = initializeModels();
+    return initialized[prop as keyof typeof initialized];
+  }
+});
 
 export type ModelType = keyof typeof models;
 

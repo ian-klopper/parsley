@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
 
   // Get all cookies
   const allCookies = cookieStore.getAll()

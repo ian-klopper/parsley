@@ -13,6 +13,10 @@ import { debugLogger } from '../utils/debug-logger';
 import { RealTokenTracker } from '../utils/token-tracker';
 import { models, estimateTextTokens } from '../models/gemini-models';
 import { allowedCategories, allowedSizes } from '../types';
+import { proRateLimiter } from '../../gemini-rate-limiter';
+import { getFileManager, UploadedFile } from '../gemini-file-manager';
+import { getCacheManager } from '../cache-manager';
+import { globalCacheTracker } from '../utils/cache-tracker';
 import type {
   PreparedDocument,
   RawMenuItem,
@@ -20,6 +24,14 @@ import type {
   SizeOption,
   ModifierGroup
 } from '../types';
+
+/**
+ * Interface for tracking accumulated modifiers across sequential batches
+ */
+interface AccumulatedModifiers {
+  modifierGroups: ModifierGroup[];
+  usedNames: Set<string>;
+}
 
 /**
  * Create enrichment batches (group items for Pro processing)
@@ -53,7 +65,7 @@ function findRelevantContext(
   // Get document IDs referenced by items in this batch
   const referencedDocIds = new Set(itemBatch.map(item => item.sourceInfo.documentId));
 
-  for (const docId of referencedDocIds) {
+  for (const docId of Array.from(referencedDocIds)) {
     const doc = documents.find(d => d.id === docId);
     if (!doc) continue;
 
@@ -150,7 +162,7 @@ function findRelevantContext(
  * Create optimized enrichment prompt that only returns sizes and modifiers
  * Now supports multimodal input for full document context
  */
-function createEnrichmentPrompt(itemBatch: RawMenuItem[], documents: PreparedDocument[]): any {
+function createEnrichmentPrompt(itemBatch: RawMenuItem[], documents: PreparedDocument[], uploadedFiles: Map<string, UploadedFile>): any {
   const parts: any[] = [
     {
       text: `You are an expert menu consultant. Add sizes and modifiers to these menu items.
@@ -216,53 +228,173 @@ Return ONLY a JSON array with this EXACT structure:
     }
   ];
 
-  // Add multimodal parts for all documents to provide full context
+  // Add file references for all uploaded documents to provide full context
   for (const doc of documents) {
-    if (doc.type === 'pdf' && doc.pages) {
-      // For PDFs, attach each page as inline data
-      for (const page of doc.pages) {
-        if (page.isImage && typeof page.content === 'string' && page.content.startsWith('data:')) {
-          // Extract base64 from data URL
-          const base64Match = page.content.match(/^data:application\/pdf;base64,(.+)$/);
-          if (base64Match) {
-            parts.push({
-              inlineData: {
-                mimeType: 'application/pdf',
-                data: base64Match[1]
-              }
-            });
-          }
-        } else if (!page.isImage && typeof page.content === 'string') {
-          // For text-based pages, include as text
-          parts.push({
-            text: `Document "${doc.name}" Page ${page.pageNumber} text: ${page.content.substring(0, 1000)}`
-          });
+    const uploadedFile = uploadedFiles.get(doc.id);
+    if (uploadedFile) {
+      parts.push({
+        fileData: {
+          mimeType: uploadedFile.mimeType,
+          fileUri: uploadedFile.uri
         }
-      }
-    } else if (doc.type === 'image' && typeof doc.content === 'string') {
-      // For standalone images
-      const base64Match = doc.content.match(/^data:image\/[^;]+;base64,(.+)$/);
-      if (base64Match) {
-        const mimeType = doc.content.split(';')[0].split(':')[1];
-        parts.push({
-          inlineData: {
-            mimeType,
-            data: base64Match[1]
-          }
-        });
-      }
-    } else if (doc.type === 'spreadsheet' && doc.sheets) {
-      // For spreadsheets, include as CSV text (first sheet)
-      const firstSheet = doc.sheets[0];
-      if (firstSheet) {
-        parts.push({
-          text: `Document "${doc.name}" Sheet "${firstSheet.name}" data:\n${firstSheet.content.substring(0, 2000)}`
-        });
-      }
+      });
     }
   }
 
   return { contents: [{ parts }] };
+}
+
+/**
+ * Create enrichment prompt with accumulated modifier context for sequential batching
+ */
+function createEnrichmentPromptWithContext(
+  itemBatch: RawMenuItem[],
+  documents: PreparedDocument[],
+  uploadedFiles: Map<string, UploadedFile>,
+  accumulatedModifiers: AccumulatedModifiers
+): any {
+  const existingModifiersText = accumulatedModifiers.modifierGroups.length > 0
+    ? `\n\nEXISTING MODIFIER GROUPS (maintain consistency - avoid duplicates):\n${JSON.stringify(accumulatedModifiers.modifierGroups, null, 2)}`
+    : '';
+
+  const parts: any[] = [
+    {
+      text: `You are an expert menu consultant. Add sizes and modifiers to these menu items.
+
+PREDEFINED CATEGORIES (use exact names):
+${allowedCategories.join(', ')}
+
+PREDEFINED SIZES (use exact names):
+${allowedSizes.join(', ')}
+
+TASKS:
+1. Find size options mentioned in descriptions and structure them
+2. Find modifier groups (toppings, sides, add-ons) and structure them
+3. IMPORTANT: Check existing modifier groups and maintain consistency - use similar naming for similar modifiers
+4. If creating new modifier groups, ensure they don't duplicate existing ones
+5. Extract pricing for modifiers when available
+
+${existingModifiersText}
+
+Raw menu items to structure:
+${itemBatch.map((item, index) => `
+ITEM ID: ${index + 1}
+Name: ${item.name}
+Category: ${item.category || 'Unknown'}
+Price: ${item.price || '$0.00'}
+Description: ${item.description || 'None'}
+Section: ${item.section || 'Unknown'}
+`).join('\n')}
+
+Return ONLY a JSON array with this EXACT structure:
+[
+  {
+    "id": "1",
+    "sizes": [
+      {
+        "size": "N/A",
+        "price": "12.99",
+        "isDefault": true
+      }
+    ],
+    "modifierGroups": [
+      {
+        "name": "Add Protein",
+        "options": ["Grilled Chicken (+$5)", "Salmon (+$8)"],
+        "required": false,
+        "multiSelect": false
+      }
+    ]
+  }
+]`
+    }
+  ];
+
+  // Add file references for all uploaded documents to provide full context
+  for (const doc of documents) {
+    const uploadedFile = uploadedFiles.get(doc.id);
+    if (uploadedFile) {
+      parts.push({
+        fileData: {
+          mimeType: uploadedFile.mimeType,
+          fileUri: uploadedFile.uri
+        }
+      });
+    }
+  }
+
+  return { contents: [{ parts }] };
+}
+
+/**
+ * Update accumulated modifiers from batch results
+ */
+function updateAccumulatedModifiers(
+  current: AccumulatedModifiers,
+  newItems: FinalMenuItem[]
+): AccumulatedModifiers {
+  const updated = { ...current };
+
+  for (const item of newItems) {
+    for (const modifierGroup of item.modifierGroups) {
+      // Check for duplicates by name similarity
+      const existingGroup = updated.modifierGroups.find(g =>
+        g.name.toLowerCase() === modifierGroup.name.toLowerCase() ||
+        calculateSimilarity(g.name, modifierGroup.name) > 0.8
+      );
+
+      if (!existingGroup) {
+        updated.modifierGroups.push(modifierGroup);
+        updated.usedNames.add(modifierGroup.name.toLowerCase());
+      }
+    }
+  }
+
+  return updated;
+}
+
+/**
+ * Calculate similarity between two strings for duplicate detection
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  const longer = str1.length > str2.length ? str1 : str2;
+  const shorter = str1.length > str2.length ? str2 : str1;
+
+  if (longer.length === 0) return 1.0;
+
+  const editDistance = levenshteinDistance(longer, shorter);
+  return (longer.length - editDistance) / longer.length;
+}
+
+/**
+ * Calculate Levenshtein distance for string similarity
+ */
+function levenshteinDistance(str1: string, str2: string): number {
+  const matrix = [];
+
+  for (let i = 0; i <= str2.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= str1.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= str2.length; i++) {
+    for (let j = 1; j <= str1.length; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+
+  return matrix[str2.length][str1.length];
 }
 
 /**
@@ -431,20 +563,132 @@ function parseEnrichmentResponse(responseText: string): Array<{
 }
 
 /**
+ * Try to use cached extraction data to perform enrichment
+ * This references the master cache created by Phase 2
+ */
+async function tryUseCachedExtraction(
+  rawItems: RawMenuItem[],
+  documents: PreparedDocument[],
+  uploadedFiles: Map<string, UploadedFile>,
+  tokenTracker: RealTokenTracker,
+  masterCacheKey: string
+): Promise<FinalMenuItem[] | null> {
+  try {
+    const cacheManager = getCacheManager();
+    const jobId = masterCacheKey.replace('master-', '');
+
+    // Try to get the cached extraction data
+    const cachedExtraction = await cacheManager.getCachedContent(`extraction-${jobId}`);
+
+    if (!cachedExtraction) {
+      debugLogger.debug(3, 'CACHE_MISS', 'No cached extraction data found');
+      globalCacheTracker.recordCacheMiss(`extraction-${jobId}`, 3, jobId);
+      return null;
+    }
+
+    debugLogger.debug(3, 'CACHE_HIT', `Found cached extraction: ${cachedExtraction.tokenCount} tokens`);
+    globalCacheTracker.recordCacheHit(`extraction-${jobId}`, cachedExtraction.tokenCount, 0.002, 3, jobId);
+
+    // Create enrichment prompt that references the cached data
+    const enrichmentPrompt = `You are an expert menu consultant. Using the cached extraction data, add sizes and modifiers to these menu items.
+
+PREDEFINED CATEGORIES (use exact names):
+${allowedCategories.join(', ')}
+
+PREDEFINED SIZES (use exact names):
+${allowedSizes.join(', ')}
+
+CACHED EXTRACTION REFERENCE: ${cachedExtraction.uri}
+
+TASKS:
+1. Use the cached extraction data to understand all menu items
+2. Find size options mentioned in descriptions and structure them
+3. Find modifier groups (toppings, sides, add-ons) and structure them
+4. Extract pricing for modifiers when available
+5. Maintain consistency across all items
+
+Return ONLY a JSON array with enrichment data for the first ${Math.min(rawItems.length, 50)} items:
+[
+  {
+    "id": "1",
+    "sizes": [{"size": "Regular", "price": "12.99", "isDefault": true}],
+    "modifierGroups": [
+      {
+        "name": "Add Protein",
+        "options": ["Grilled Chicken (+$5)", "Salmon (+$8)"],
+        "required": false,
+        "multiSelect": false
+      }
+    ]
+  }
+]`;
+
+    // Add document file references
+    const parts: any[] = [{ text: enrichmentPrompt }];
+    for (const doc of documents) {
+      const uploadedFile = uploadedFiles.get(doc.id);
+      if (uploadedFile) {
+        parts.push({
+          fileData: {
+            mimeType: uploadedFile.mimeType,
+            fileUri: uploadedFile.uri
+          }
+        });
+      }
+    }
+
+    // Make API call using cached context
+    debugLogger.apiCallStart(3, 1, 'gemini-pro', estimateTextTokens(enrichmentPrompt));
+    const startTime = Date.now();
+
+    await proRateLimiter.acquire();
+    const response = await models.pro.generateContent({
+      contents: [{ role: 'user', parts }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 8000,
+        stopSequences: [],
+      }
+    });
+
+    const responseTime = Date.now() - startTime;
+    const responseText = response.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    // Track token usage
+    const tokenUsage = tokenTracker.recordApiCall(3, 'pro', response);
+    debugLogger.apiCallComplete(3, 1, 'gemini-pro', tokenUsage.input, tokenUsage.output, responseTime, tokenUsage.cost);
+
+    // Parse the enriched items
+    const enrichedItems = parseEnrichmentResponse(responseText, rawItems.slice(0, 50));
+
+    debugLogger.success(3, 'CACHE_ENRICHMENT_PARSED',
+      `Successfully parsed ${enrichedItems.length} enriched items from cached data`);
+
+    return enrichedItems;
+
+  } catch (error) {
+    debugLogger.warn(3, 'CACHE_ENRICHMENT_FAILED',
+      `Cache-based enrichment failed: ${(error as Error).message}`);
+    return null;
+  }
+}
+
+/**
  * Process all items in a single enrichment call for full context
  * Falls back to batching only if the single call fails
  */
 async function processSingleEnrichmentCall(
   items: RawMenuItem[],
   documents: PreparedDocument[],
+  uploadedFiles: Map<string, UploadedFile>,
   tokenTracker: RealTokenTracker
 ): Promise<FinalMenuItem[]> {
   debugLogger.debug(3, 'SINGLE_CALL_ATTEMPT',
     `Attempting single enrichment call for ${items.length} items`);
 
   try {
-    // Create multimodal prompt with full document context
-    const prompt = createEnrichmentPrompt(items, documents);
+    // Create multimodal prompt with full document context using file references
+    const prompt = createEnrichmentPrompt(items, documents, uploadedFiles);
     const promptTokens = estimateTextTokens(JSON.stringify(prompt));
 
     debugLogger.debug(3, 'SINGLE_CALL_PROMPT_SIZE',
@@ -453,22 +697,25 @@ async function processSingleEnrichmentCall(
     // Debug: Log prompt structure
     console.log('🔍 PHASE 3 PROMPT DEBUG:');
     console.log(`Text parts: ${prompt.contents[0].parts.filter((p: any) => p.text).length}`);
-    console.log(`Image parts: ${prompt.contents[0].parts.filter((p: any) => p.inlineData).length}`);
+    console.log(`File refs: ${prompt.contents[0].parts.filter((p: any) => p.fileData).length}`);
 
     // Make API call to Gemini 2.5 Pro with thinking disabled
     debugLogger.apiCallStart(3, 1, 'gemini-2.5-pro', promptTokens);
     const startTime = Date.now();
 
-    const response = await models.pro.generateContent({
-      contents: [{
-        role: 'user',
-        parts: prompt.contents[0].parts
-      }],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 20000, // Increased for full context
-        stopSequences: [],
-      }
+    // Use rate limiter for Pro model (2 req/min)
+    const response = await proRateLimiter.enqueue(async () => {
+      return models.pro.generateContent({
+        contents: [{
+          role: 'user',
+          parts: prompt.contents[0].parts
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 20000, // Increased for full context
+          stopSequences: [],
+        }
+      });
     });
 
     const responseTime = Date.now() - startTime;
@@ -536,6 +783,7 @@ async function processSingleEnrichmentCall(
 async function processEnrichmentBatch(
   itemBatch: RawMenuItem[],
   documents: PreparedDocument[],
+  uploadedFiles: Map<string, UploadedFile>,
   tokenTracker: RealTokenTracker,
   batchIndex: number,
   totalBatches: number
@@ -544,7 +792,7 @@ async function processEnrichmentBatch(
 
   try {
     // Create multimodal prompt with document context
-    const prompt = createEnrichmentPrompt(itemBatch, documents);
+    const prompt = createEnrichmentPrompt(itemBatch, documents, uploadedFiles);
     const promptTokens = estimateTextTokens(JSON.stringify(prompt));
 
     // Debug: Log prompt structure
@@ -642,7 +890,8 @@ async function processEnrichmentBatch(
 export async function enrichMenuItems(
   rawItems: RawMenuItem[],
   documents: PreparedDocument[],
-  tokenTracker: RealTokenTracker
+  tokenTracker: RealTokenTracker,
+  masterCacheKey?: string
 ): Promise<FinalMenuItem[]> {
   debugLogger.startPhase(3, 'Modifier and Size Enrichment with Gemini Pro');
 
@@ -655,12 +904,20 @@ export async function enrichMenuItems(
   let enrichedItems: FinalMenuItem[] = [];
 
   try {
-    // STEP 1: Try single call for full context (preferred approach)
+    // Get file manager and ensure all documents are uploaded
+    const fileManager = getFileManager();
+    const uploadedFiles = await fileManager.uploadAllDocuments(documents);
+    debugLogger.debug(3, 'FILES_READY', `Using ${uploadedFiles.size} uploaded files for enrichment`);
+
+    // STEP 0: Skip explicit caching - use implicit caching for Gemini 2.5 models
+    debugLogger.debug(3, 'CACHE_SKIP', 'Using implicit caching for Gemini 2.5 models instead of explicit cache');
+
+    // STEP 1: Try single call for full context (fallback approach)
     debugLogger.debug(3, 'ENRICHMENT_STRATEGY',
-      `Attempting single call for ${rawItems.length} items for full context`);
+      `Cache unavailable, attempting single call for ${rawItems.length} items for full context`);
 
     try {
-      enrichedItems = await processSingleEnrichmentCall(rawItems, documents, tokenTracker);
+      enrichedItems = await processSingleEnrichmentCall(rawItems, documents, uploadedFiles, tokenTracker);
       
       // Log enrichment summary for single call success
       const sizeCounts = enrichedItems.reduce((acc, item) => acc + item.sizes.length, 0);
@@ -680,31 +937,121 @@ export async function enrichMenuItems(
       debugLogger.debug(3, 'ENRICHMENT_BATCHING_START',
         `Processing ${rawItems.length} items in ${batches.length} batches (fallback)`);
 
-      // Process each batch
+      // Process batches SEQUENTIALLY with accumulating context to maintain modifier consistency
+      debugLogger.debug(3, 'SEQUENTIAL_BATCHING_START',
+        `Processing ${rawItems.length} items in ${batches.length} sequential batches`);
+
+      let accumulatedModifiers: AccumulatedModifiers = {
+        modifierGroups: [],
+        usedNames: new Set()
+      };
+
       for (let i = 0; i < batches.length; i++) {
         const batch = batches[i];
         const batchIndex = i + 1;
 
-        debugLogger.debug(3, 'BATCH_PROCESSING',
+        debugLogger.debug(3, 'SEQUENTIAL_BATCH_PROCESSING',
           `Batch ${batchIndex}/${batches.length}: ${batch.length} items`);
 
-        const batchResults = await processEnrichmentBatch(
-          batch,
-          documents,
-          tokenTracker,
-          batchIndex,
-          batches.length
-        );
+        const enrichedBatch = await proRateLimiter.enqueue(async () => {
+          debugLogger.batchStart(3, batchIndex, batches.length, 0, 'gemini-2.5-pro');
+          const startTime = Date.now();
 
-        enrichedItems.push(...batchResults);
+          try {
+            // Create multimodal prompt with document context AND accumulated modifiers
+            const prompt = createEnrichmentPromptWithContext(batch, documents, uploadedFiles, accumulatedModifiers);
+            const promptTokens = estimateTextTokens(JSON.stringify(prompt));
+
+            // Debug: Log prompt structure
+            console.log(`🔍 PHASE 3 SEQUENTIAL BATCH ${batchIndex} PROMPT DEBUG:`);
+            console.log(`Text parts: ${prompt.contents[0].parts.filter((p: any) => p.text).length}`);
+            console.log(`File refs: ${prompt.contents[0].parts.filter((p: any) => p.fileData).length}`);
+            console.log(`Accumulated modifiers: ${accumulatedModifiers.modifierGroups.length} groups`);
+
+            // Make API call to Gemini 2.5 Pro
+            debugLogger.apiCallStart(3, batchIndex, 'gemini-2.5-pro', promptTokens);
+
+            const response = await models.pro.generateContent({
+              contents: [{
+                role: 'user',
+                parts: prompt.contents[0].parts
+              }],
+              generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 10000,
+                stopSequences: [],
+              }
+            });
+
+            const responseTime = Date.now() - startTime;
+
+            // Extract response text
+            const responseText = response.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+            console.log(`DEBUG: Phase 3 Sequential Batch ${batchIndex} response text length:`, responseText.length);
+
+            // Track tokens and cost
+            const tokenUsage = tokenTracker.recordApiCall(3, 'pro', response);
+            debugLogger.apiCallComplete(3, batchIndex, 'gemini-2.5-pro', tokenUsage.input, tokenUsage.output, responseTime, tokenUsage.cost);
+
+            // Parse response
+            const enrichmentData = parseEnrichmentResponse(responseText);
+
+            // Map enrichment data back to items
+            const enrichedItems: FinalMenuItem[] = batch.map((item, idx) => {
+              const id = String(idx + 1);
+              const enrichment = enrichmentData.find(e => e.id === id);
+
+              const sizes = enrichment?.sizes || [{
+                size: 'N/A',
+                price: item.price,
+                isDefault: true
+              }];
+
+              const modifierGroups = enrichment?.modifierGroups || [];
+
+              return {
+                name: item.name,
+                description: item.description,
+                category: allowedCategories.includes(item.category) ? item.category : 'Open Food',
+                section: item.section,
+                sizes,
+                modifierGroups,
+                sourceInfo: item.sourceInfo
+              };
+            });
+
+            debugLogger.batchComplete(3, batchIndex, enrichedItems.length, responseTime);
+            return enrichedItems;
+
+          } catch (error) {
+            debugLogger.error(3, 'SEQUENTIAL_BATCH_ENRICHMENT_FAILED', `Batch ${batchIndex}: ${(error as Error).message}`);
+            debugLogger.apiCallError(3, batchIndex, 'gemini-2.5-pro', (error as Error).message);
+
+            // Return minimal structured versions
+            return batch.map(item => ({
+              name: item.name,
+              description: item.description,
+              category: allowedCategories.includes(item.category) ? item.category : 'Open Food',
+              section: item.section,
+              sizes: [{
+                size: 'N/A',
+                price: item.price,
+                isDefault: true
+              }],
+              modifierGroups: [],
+              sourceInfo: item.sourceInfo
+            }));
+          }
+        });
+
+        enrichedItems.push(...enrichedBatch);
+
+        // Update accumulated modifiers from this batch's results
+        accumulatedModifiers = updateAccumulatedModifiers(accumulatedModifiers, enrichedBatch);
 
         // Memory management
-        debugLogger.logMemoryUsage(`After enrichment batch ${batchIndex}`, 3);
-
-        // Rate limiting pause between Pro model calls
-        if (i < batches.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second pause
-        }
+        debugLogger.logMemoryUsage(`After sequential batch ${batchIndex}`, 3);
       }
 
       // Log enrichment summary for batch processing

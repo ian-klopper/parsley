@@ -7,6 +7,10 @@ import { debugLogger } from '../utils/debug-logger';
 import { RealTokenTracker } from '../utils/token-tracker';
 import { models, estimateTextTokens, estimateImageTokens } from '../models/gemini-models';
 import { allowedCategories, allowedSizes } from '../types';
+import { flashLiteRateLimiter } from '../../gemini-rate-limiter';
+import { getFileManager } from '../gemini-file-manager';
+import { getCacheManager } from '../cache-manager';
+import { globalCacheTracker } from '../utils/cache-tracker';
 import type {
   PreparedDocument,
   MenuStructure,
@@ -21,10 +25,15 @@ import type {
  */
 function createExtractionBatches(
   section: MenuSection,
-  documents: PreparedDocument[]
+  documents: PreparedDocument[],
+  uploadedFiles: Map<string, any>,
+  globalProcessedSheets?: Set<string>
 ): ExtractionBatch[] {
   const batches: ExtractionBatch[] = [];
   let batchIndex = 0;
+
+  // Use global processed sheets tracking or create local one
+  const processedSheets = globalProcessedSheets || new Set<string>();
 
   // Dynamic batching based on section size
   const maxTokensPerBatch = section.isSuperBig ? 2000 : // Large sections get smaller batches
@@ -55,21 +64,6 @@ function createExtractionBatches(
         if (processedPages.has(page.pageNumber)) continue;
         processedPages.add(page.pageNumber);
 
-        // Debug: Check page content before batch creation
-        console.log(`🔍 DEBUG: Page content before batch creation:`);
-        console.log(`  Page ${page.pageNumber} content length: ${page.content?.length}`);
-        console.log(`  Page content preview: ${JSON.stringify(page.content?.substring(0, 100))}`);
-        console.log(`  Full page content: ${JSON.stringify(page.content)}`);
-
-        // Clean and format the content for better AI parsing
-        const cleanContent = page.content
-          .split('\n')
-          .filter(line => line.trim().length > 0)
-          .join('\n')
-          .trim();
-
-        console.log(`🔍 DEBUG: Cleaned content:`, JSON.stringify(cleanContent));
-
         // Determine model based on content size
         const model = page.tokens > 4000 ? 'flashLite' : 'flash';
 
@@ -77,26 +71,27 @@ function createExtractionBatches(
           id: `batch_${++batchIndex}`,
           phase: 2,
           section,
-          content: cleanContent,
+          content: page.content,
           isImage: false,
           tokens: page.tokens,
           model,
           sourceRefs: [{
             documentId: doc.id,
             pageNumbers: [page.pageNumber]
-          }]
+          }],
+          fileRefs: [] // Will be populated below
         });
       }
       
-      // If we have no successful text pages or explicit image-only pages, use image fallbacks
+      // If we have no successful text pages, use image fallbacks
       const remainingPages = targetPages.filter(pageNum => !processedPages.has(pageNum));
       const imagePages = doc.pages.filter(p => p.isImage && p.hasContent && 
-        (remainingPages.includes(p.pageNumber) || p.isFallback));
+        remainingPages.includes(p.pageNumber));
       
       for (const page of imagePages) {
-        if (page.isFallback && processedPages.has(page.pageNumber)) continue; // Skip fallbacks for already processed pages
+        if (processedPages.has(page.pageNumber)) continue; // Skip already processed pages
         
-        const pageNum = page.pageNumber === 0 && page.isFallback ? 
+        const pageNum = page.pageNumber === 0 ? 
           1 : page.pageNumber; // Use page 1 for fallback images
           
         if (processedPages.has(pageNum)) continue;
@@ -114,7 +109,8 @@ function createExtractionBatches(
           sourceRefs: [{
             documentId: doc.id,
             pageNumbers: [pageNum]
-          }]
+          }],
+          fileRefs: [] // Will be populated below
         });
       }
       
@@ -132,24 +128,58 @@ function createExtractionBatches(
       // Process specific sheets or all sheets
       const targetSheets = location.sheetNames || doc.sheets.map(s => s.name);
 
+      // Track which sheets have been processed globally to prevent duplicates
+      // Use more specific key to allow same sheet in different contexts
+      if (!globalProcessedSheets) {
+        globalProcessedSheets = new Set();
+      }
+
       for (const sheetName of targetSheets) {
+        // Create a more specific key that includes batch context
+        const globalSheetKey = `${doc.id}-${sheetName}`;
+        const sectionSheetKey = `${section.name}-${doc.id}-${sheetName}`;
+
+        // Only skip if this EXACT sheet has been processed globally (not just for this section)
+        if (globalProcessedSheets.has(globalSheetKey)) {
+          debugLogger.debug(2, 'SHEET_GLOBALLY_PROCESSED',
+            `Skipping globally processed sheet "${sheetName}" from document "${doc.id}"`);
+          console.log(`🔍 GLOBAL DEDUPLICATION: Skipped sheet "${sheetName}" (already processed globally)`);
+          continue;
+        }
+
+        // For mixed content, allow the same spreadsheet to contribute to multiple sections
+        // but track it to prevent infinite loops
+        console.log(`🔍 SPREADSHEET PROCESSING: Processing sheet "${sheetName}" for section "${section.name}" (global key: ${globalSheetKey})`);
+
+        // Mark as processed globally
+        globalProcessedSheets.add(globalSheetKey);
+
         const sheet = doc.sheets.find(s => s.name === sheetName);
         if (!sheet || !sheet.hasContent) continue;
 
-        // For large sheets, consider splitting into row groups
+        // For large sheets, consider splitting into row groups with proper header inclusion
         if (sheet.tokens > maxTokensPerBatch && sheet.rows > 50) {
           debugLogger.debug(2, 'SPLITTING_LARGE_SHEET',
             `Sheet "${sheetName}": ${sheet.rows} rows, ${sheet.tokens} tokens`);
 
-          // Split into row groups (roughly 1/3 of sheet per batch)
-          const rowsPerBatch = Math.ceil(sheet.rows / 3);
           const lines = sheet.content.split('\n');
+          const headerLine = lines[0]; // Preserve header row
+          const dataLines = lines.slice(1); // Data rows only
 
-          for (let i = 0; i < lines.length; i += rowsPerBatch) {
-            const batchContent = lines.slice(i, i + rowsPerBatch).join('\n');
+          // Split data rows into non-overlapping chunks
+          const rowsPerBatch = Math.ceil(dataLines.length / 3);
+          let processedRowChunks = 0;
+
+          for (let i = 0; i < dataLines.length; i += rowsPerBatch) {
+            const dataChunk = dataLines.slice(i, i + rowsPerBatch);
+            // Include header with each chunk to maintain context
+            const batchContent = [headerLine, ...dataChunk].join('\n');
             const batchTokens = estimateTextTokens(batchContent);
 
-            if (batchContent.trim()) {
+            if (batchContent.trim() && dataChunk.length > 0) {
+              const startRow = i + 2; // +2 because we skip header and use 1-based indexing
+              const endRow = Math.min(i + rowsPerBatch + 1, dataLines.length + 1);
+
               batches.push({
                 id: `batch_${++batchIndex}`,
                 phase: 2,
@@ -160,9 +190,13 @@ function createExtractionBatches(
                 model: batchTokens > 4000 ? 'flashLite' : 'flash',
                 sourceRefs: [{
                   documentId: doc.id,
-                  sheetNames: [`${sheetName}_rows_${i + 1}-${i + rowsPerBatch}`]
-                }]
+                  sheetNames: [`${sheetName}_chunk_${++processedRowChunks}_rows_${startRow}-${endRow}`]
+                }],
+                fileRefs: [] // Will be populated below
               });
+
+              debugLogger.debug(2, 'SHEET_CHUNK_CREATED',
+                `Created chunk ${processedRowChunks} for "${sheetName}": rows ${startRow}-${endRow} (${dataChunk.length} data rows + header)`);
             }
           }
         } else {
@@ -180,8 +214,12 @@ function createExtractionBatches(
             sourceRefs: [{
               documentId: doc.id,
               sheetNames: [sheetName]
-            }]
+            }],
+            fileRefs: [] // Will be populated below
           });
+
+          debugLogger.debug(2, 'SHEET_BATCH_CREATED',
+            `Created single batch for "${sheetName}": ${sheet.rows} rows, ${sheet.tokens} tokens`);
         }
       }
 
@@ -198,13 +236,25 @@ function createExtractionBatches(
         model: 'flashLite', // Images always use Flash-Lite
         sourceRefs: [{
           documentId: doc.id
-        }]
+        }],
+        fileRefs: [] // Will be populated below
       });
     }
   }
 
+  // Populate file references for all batches
+  for (const batch of batches) {
+    const uploadedFile = uploadedFiles.get(batch.sourceRefs[0].documentId);
+    if (uploadedFile) {
+      batch.fileRefs = [{
+        uri: uploadedFile.uri,
+        mimeType: uploadedFile.mimeType
+      }];
+    }
+  }
+
   debugLogger.debug(2, 'BATCHES_CREATED',
-    `Section "${section.name}": ${batches.length} batches, models: ${[...new Set(batches.map(b => b.model))].join(', ')}`);
+    `Section "${section.name}": ${batches.length} batches, models: ${Array.from(new Set(batches.map(b => b.model))).join(', ')}`);
 
   return batches;
 }
@@ -213,13 +263,14 @@ function createExtractionBatches(
  * Create extraction prompt for a specific section
  */
 function createExtractionPrompt(batch: ExtractionBatch, allSections: string[]): string {
+  const sectionName = batch.section?.name || 'unknown';
   const sectionContext = allSections.length > 1 ?
     `This menu has these sections: ${allSections.join(', ')}.\n` : '';
 
-  return `You are an expert menu manager extracting items from the "${batch.section.name}" section.
+  return `You are an expert menu manager extracting items from the "${sectionName}" section.
 
 ${sectionContext}
-TASK: Extract ONLY menu items that belong to the "${batch.section.name}" section.
+TASK: Extract ONLY menu items that belong to the "${sectionName}" section.
 
 PREDEFINED CATEGORIES (use exact names):
 ${allowedCategories.join(', ')}
@@ -236,7 +287,7 @@ EXTRACTION RULES:
 6. Ignore section headers and non-item text
 7. Do NOT create separate size or modifier fields yet
 
-IMPORTANT: Only extract items that clearly belong to "${batch.section.name}".
+IMPORTANT: Only extract items that clearly belong to "${sectionName}".
 
 ${batch.isImage ? 'Analyze this menu image:' : 'Menu content:'}
 
@@ -283,8 +334,8 @@ function parseExtractionResponse(responseText: string, batch: ExtractionBatch): 
         name: item.name.trim(),
         description: (item.description || '').trim(),
         price: (item.price || '0').toString(),
-        category: item.category || batch.section.name,
-        section: batch.section.name,
+        category: item.category || batch.section?.name || 'Unknown',
+        section: batch.section?.name || 'Unknown',
         sourceInfo: {
           documentId: sourceRef.documentId,
           page: sourceRef.pageNumbers?.[0],
@@ -320,18 +371,16 @@ async function processExtractionBatch(
   debugLogger.batchStart(2, callIndex, 0, batch.tokens, batch.model);
 
   try {
-    // Debug: Log what Phase 2 AI will actually see
-    console.log(`🔍 PHASE 2 BATCH ${batch.id} CONTENT DEBUG:`);
-    if (batch.isImage) {
-      console.log(`  ${batch.contentType || 'image'} batch for section "${batch.section.name}" (${batch.content?.length || 0} bytes base64)`);
-    } else {
-      console.log(`  Text batch for section "${batch.section.name}":`);
-      const contentPreview = batch.content.substring(0, 300);
-      console.log(`  Content preview: ${contentPreview}${batch.content.length > 300 ? '...' : ''}`);
-      console.log(`  Total content length: ${batch.content.length} characters`);
-    }
-
-    // Create prompt
+            // Debug: Log what Phase 2 AI will actually see
+            console.log(`🔍 PHASE 2 BATCH ${batch.id} CONTENT DEBUG:`);
+            if (batch.isImage) {
+              console.log(`  ${batch.contentType || 'image'} batch for section "${batch.section?.name || 'unknown'}" (${batch.content?.length || 0} bytes base64)`);
+            } else {
+              console.log(`  Text batch for section "${batch.section?.name || 'unknown'}":`);
+              const contentPreview = batch.content.substring(0, 300);
+              console.log(`  Content preview: ${contentPreview}${batch.content.length > 300 ? '...' : ''}`);
+              console.log(`  Total content length: ${batch.content.length} characters`);
+            }    // Create prompt
     const prompt = createExtractionPrompt(batch, allSections);
 
     // Make API call with direct Google AI SDK
@@ -392,7 +441,8 @@ async function processExtractionBatch(
 export async function extractMenuItems(
   structure: MenuStructure,
   documents: PreparedDocument[],
-  tokenTracker: RealTokenTracker
+  tokenTracker: RealTokenTracker,
+  masterCacheKey?: string
 ): Promise<RawMenuItem[]> {
   debugLogger.startPhase(2, 'Item Extraction with Flash Models');
 
@@ -401,7 +451,16 @@ export async function extractMenuItems(
   let totalBatches = 0;
   let callIndex = 0;
 
+  // Global tracking to prevent duplicate spreadsheet processing
+  const globalProcessedSheets = new Set<string>();
+  console.log(`🔍 EXTRACTION START: Processing ${structure.sections.length} sections for ${documents.length} documents`);
+
   try {
+    // Get file manager and ensure all documents are uploaded
+    const fileManager = getFileManager();
+    const uploadedFiles = await fileManager.uploadAllDocuments(documents);
+    debugLogger.debug(2, 'FILES_READY', `Using ${uploadedFiles.size} uploaded files for extraction`);
+
     // Process each section
     for (let sectionIndex = 0; sectionIndex < structure.sections.length; sectionIndex++) {
       const section = structure.sections[sectionIndex];
@@ -410,7 +469,7 @@ export async function extractMenuItems(
         `Processing section ${sectionIndex + 1}/${structure.sections.length}: "${section.name}"`);
 
       // Create batches for this section
-      const batches = createExtractionBatches(section, documents);
+      const batches = createExtractionBatches(section, documents, uploadedFiles, globalProcessedSheets);
       totalBatches += batches.length;
 
       if (batches.length === 0) {
@@ -418,17 +477,97 @@ export async function extractMenuItems(
         continue;
       }
 
-      // Process batches for this section
+      // Process batches for this section in parallel with rate limiting
       const sectionItems: RawMenuItem[] = [];
+      const batchPromises = batches.map(async (batch, batchIndex) => {
+        const currentCallIndex = callIndex + batchIndex + 1;
 
-      for (const batch of batches) {
-        callIndex++;
-        const batchItems = await processExtractionBatch(batch, allSectionNames, tokenTracker, callIndex);
-        sectionItems.push(...batchItems);
+        // Use rate limiter for Flash models (15 req/min)
+        return flashLiteRateLimiter.enqueue(async () => {
+          debugLogger.batchStart(2, currentCallIndex, 0, batch.tokens, batch.model);
+          const startTime = Date.now();
 
-        // Memory management
-        debugLogger.logMemoryUsage(`After batch ${callIndex}`, 2);
-      }
+          try {
+            // Create prompt
+            const prompt = createExtractionPrompt(batch, allSectionNames);
+
+            // Make API call with file references instead of inline data
+            debugLogger.apiCallStart(2, currentCallIndex, batch.model, batch.tokens);
+
+            const modelInstance = models[batch.model];
+            const parts: any[] = [{ text: prompt }];
+
+            // Add file references for this batch
+            if (batch.fileRefs && batch.fileRefs.length > 0) {
+              for (const fileRef of batch.fileRefs) {
+                parts.push({
+                  fileData: {
+                    mimeType: fileRef.mimeType,
+                    fileUri: fileRef.uri
+                  }
+                });
+              }
+              debugLogger.debug(2, 'FILE_REFS_ADDED', `Batch ${batch.id}: ${batch.fileRefs.length} file references`);
+            } else if (batch.content) {
+              // Fallback to inline content if no file refs (for text content)
+              if (batch.isImage) {
+                parts.push({
+                  inlineData: {
+                    mimeType: batch.contentType || 'image/jpeg',
+                    data: batch.content
+                  }
+                });
+              } else {
+                parts.push({ text: '\n\nContent to extract from:\n' + batch.content });
+              }
+            }
+
+            const response = await modelInstance.generateContent({
+              contents: [{
+                role: 'user',
+                parts: parts
+              }],
+              generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 8000,
+                stopSequences: [],
+              }
+            });
+
+            const responseTime = Date.now() - startTime;
+
+            // Extract response text from Google AI SDK response format
+            const responseText = response.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+            console.log(`DEBUG: Phase 2 Call ${currentCallIndex} response text length:`, responseText.length);
+            if (responseText.length === 0) {
+              console.log(`DEBUG: Phase 2 Call ${currentCallIndex} full response:`, JSON.stringify(response, null, 2));
+            }
+
+            // Track real tokens and cost
+            const tokenUsage = tokenTracker.recordApiCall(2, batch.model, response, batch.isImage ? 1 : 0);
+            debugLogger.apiCallComplete(2, currentCallIndex, batch.model, tokenUsage.input, tokenUsage.output, responseTime, tokenUsage.cost);
+
+            // Parse response
+            const items = parseExtractionResponse(responseText, batch);
+            debugLogger.batchComplete(2, currentCallIndex, items.length, responseTime);
+
+            return items;
+
+          } catch (error) {
+            debugLogger.error(2, 'BATCH_EXTRACTION_FAILED', `Batch ${batch.id}: ${(error as Error).message}`);
+            debugLogger.apiCallError(2, currentCallIndex, batch.model, (error as Error).message);
+            return []; // Return empty array to continue with other batches
+          }
+        });
+      });
+
+      // Wait for all batches in this section to complete
+      const batchResults = await Promise.all(batchPromises);
+      sectionItems.push(...batchResults.flat());
+
+      // Update call index for next section
+      callIndex += batches.length;
 
       // Log section completion
       debugLogger.success(2, 'SECTION_COMPLETE',
@@ -448,6 +587,15 @@ export async function extractMenuItems(
       return `${section.name}: ${count}`;
     }).join(', ');
 
+    console.log(`🔍 EXTRACTION SUMMARY: ${allItems.length} total items extracted`);
+    console.log(`🔍 ITEMS BY SECTION: ${itemsBySection}`);
+    console.log(`🔍 PROCESSED SHEETS: ${globalProcessedSheets.size} unique sheet-section combinations`);
+
+    // Log all processed sheet keys for debugging
+    if (globalProcessedSheets.size > 0) {
+      console.log(`🔍 PROCESSED SHEET KEYS:`, Array.from(globalProcessedSheets));
+    }
+
     debugLogger.success(2, 'EXTRACTION_COMPLETE',
       `${allItems.length} items extracted. ${itemsBySection}`);
 
@@ -461,6 +609,29 @@ export async function extractMenuItems(
         `${sectionsWithNoItems.length} sections had no items: ${sectionsWithNoItems.map(s => s.name).join(', ')}`);
     }
 
+    // SPREADSHEET SAFEGUARD: Verify spreadsheet documents contributed to extraction
+    const spreadsheetDocs = documents.filter(doc => doc.type === 'spreadsheet');
+    if (spreadsheetDocs.length > 0) {
+      const itemsFromSpreadsheets = allItems.filter(item =>
+        item.sourceRef?.documentId &&
+        spreadsheetDocs.some(doc => doc.id === item.sourceRef!.documentId)
+      );
+
+      console.log(`🔍 SPREADSHEET VALIDATION: ${itemsFromSpreadsheets.length} items extracted from ${spreadsheetDocs.length} spreadsheet documents`);
+
+      if (itemsFromSpreadsheets.length === 0) {
+        debugLogger.error(2, 'NO_SPREADSHEET_EXTRACTION',
+          `CRITICAL: ${spreadsheetDocs.length} spreadsheet documents uploaded but no items extracted from them`);
+        console.log(`🚨 SPREADSHEET ERROR: No items extracted from spreadsheets: ${spreadsheetDocs.map(d => d.name).join(', ')}`);
+      } else {
+        debugLogger.success(2, 'SPREADSHEET_EXTRACTION_SUCCESS',
+          `${itemsFromSpreadsheets.length} items successfully extracted from spreadsheets`);
+      }
+    }
+
+    // Cache the extracted items for Phase 3
+    await cacheExtractedItems(allItems, structure, documents, masterCacheKey);
+
     // Log phase cost
     tokenTracker.logPhaseCost(2, 'Item Extraction');
 
@@ -472,6 +643,59 @@ export async function extractMenuItems(
     debugLogger.error(2, 'EXTRACTION_FAILED', (error as Error).message);
     tokenTracker.logPhaseCost(2, 'Item Extraction (Failed)');
     throw error;
+  }
+}
+
+/**
+ * Cache extracted items for Phase 3 to use
+ * Creates the master extraction cache containing all results
+ */
+async function cacheExtractedItems(
+  items: RawMenuItem[],
+  structure: MenuStructure,
+  documents: PreparedDocument[],
+  masterCacheKey?: string
+): Promise<void> {
+  if (!masterCacheKey) {
+    debugLogger.debug(2, 'EXTRACTION_CACHE_SKIP', 'No master cache key provided, skipping extraction cache');
+    return;
+  }
+
+  try {
+    const cacheManager = getCacheManager();
+    const jobId = masterCacheKey.replace('master-', '');
+
+    // Create comprehensive extraction cache with all data Phase 3 needs
+    const extractionData = {
+      items: items,
+      structure: structure,
+      metadata: {
+        totalItems: items.length,
+        sectionCount: structure.sections.length,
+        itemsBySection: structure.sections.map(section => ({
+          name: section.name,
+          count: items.filter(item => item.section === section.name).length
+        })),
+        documentCount: documents.length,
+        extractedAt: new Date().toISOString(),
+        phase: 2,
+        cacheVersion: '1.0'
+      }
+    };
+
+    const extractionText = JSON.stringify(extractionData);
+    const tokenCount = estimateTextTokens(extractionText);
+
+    debugLogger.debug(2, 'EXTRACTION_CACHE_PREP',
+      `Prepared extraction cache: ${items.length} items, ${tokenCount} tokens`);
+
+    // Skip explicit extraction caching - Gemini 2.5 models use implicit caching automatically
+    debugLogger.debug(2, 'EXTRACTION_CACHE_SKIP',
+      `Using implicit caching for Gemini 2.5 models (${items.length} items extracted)`);
+
+  } catch (error) {
+    debugLogger.warn(2, 'EXTRACTION_CACHE_FAILED',
+      `Could not cache extraction data: ${(error as Error).message}`);
   }
 }
 

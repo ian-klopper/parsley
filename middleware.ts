@@ -8,6 +8,7 @@ export async function middleware(request: NextRequest) {
 
   const isProduction = process.env.NODE_ENV === 'production'
   const isSecureContext = request.url.startsWith('https://') || request.headers.get('x-forwarded-proto') === 'https'
+  const isLocalhost = request.headers.get('host')?.includes('localhost') || request.headers.get('host')?.includes('127.0.0.1')
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,7 +28,7 @@ export async function middleware(request: NextRequest) {
             const cookieOptions = {
               ...options,
               sameSite: options?.sameSite || 'lax',
-              secure: isProduction || isSecureContext || options?.secure,
+              secure: (isProduction || isSecureContext) && !isLocalhost ? true : options?.secure || false,
               path: options?.path || '/',
             }
             supabaseResponse.cookies.set(name, value, cookieOptions)

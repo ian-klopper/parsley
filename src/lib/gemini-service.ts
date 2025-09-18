@@ -7,7 +7,7 @@ import { allowedCategories, allowedSizes, tabCategories, allTabs } from '@/lib/m
 // Initialize Genkit with Google AI
 const ai = genkit({
   plugins: [googleAI({
-    apiKey: process.env.GOOGLE_API_KEY
+    apiKey: process.env.GOOGLE_AI_API_KEY
   })],
   model: gemini15Flash,
 });

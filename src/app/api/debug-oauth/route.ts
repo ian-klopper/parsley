@@ -28,7 +28,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const supabase = createClient(cookieStore)
 
     console.log('Testing code exchange...')

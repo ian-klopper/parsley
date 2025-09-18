@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase-server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
+import type { User } from '@/types/database'
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
@@ -41,7 +42,16 @@ export async function GET(request: Request) {
   }
 
   console.log('=== OAuth Callback Debug ===')
-  console.log(JSON.stringify(debugData, null, 2))
+  console.log('Request details:', {
+    method: request.method,
+    url: requestUrl.toString(),
+    origin,
+    hasCode: !!code,
+    codeLength: code?.length || 0,
+    hasError: !!error,
+    error,
+    allParams: Object.fromEntries(requestUrl.searchParams.entries())
+  })
 
   // Check for OAuth errors first
   if (error) {
@@ -50,11 +60,12 @@ export async function GET(request: Request) {
   }
 
   if (code) {
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
 
     // Check if we've already processed this code (React StrictMode/double render protection)
-    const processedCodes = cookieStore.get('processed_oauth_codes')
-    if (processedCodes?.value?.includes(code.substring(0, 10))) {
+    const processedCodesCookie = cookieStore.get('processed_oauth_codes')
+    const processedCodes = processedCodesCookie?.value
+    if (processedCodes?.includes(code.substring(0, 10))) {
       console.log('OAuth code already processed, redirecting to dashboard')
       return NextResponse.redirect(`${origin}/dashboard`)
     }
@@ -62,11 +73,13 @@ export async function GET(request: Request) {
     const supabase = createClient(cookieStore)
 
     // Log before exchange with more details
-    console.log('Attempting to exchange code for session...', {
+    const allCookies = cookieStore.getAll()
+    console.log('[OAuth Callback] Attempting to exchange code for session...', {
       codeLength: code.length,
       codePrefix: code.substring(0, 10),
       timestamp: new Date().toISOString(),
-      cookies: cookieStore.getAll().map(c => ({ name: c.name, hasValue: !!c.value }))
+      cookiesCount: allCookies.length,
+      cookieNames: allCookies.map((c: any) => c.name)
     })
 
     // Exchange the code for a session with retry
@@ -90,13 +103,13 @@ export async function GET(request: Request) {
     }
 
     if (exchangeError) {
-      console.error('Failed to exchange code for session after retries:', {
+      console.error('[OAuth Callback] Failed to exchange code for session after retries:', {
         error: exchangeError,
         message: exchangeError.message,
         status: exchangeError.status,
         name: exchangeError.name,
-        hint: exchangeError.hint || 'none',
-        code: exchangeError.code || 'none'
+        hint: (exchangeError as any).hint || 'none',
+        code: (exchangeError as any).code || 'none'
       })
 
       // More specific error messages
@@ -110,11 +123,14 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/?auth_error=${errorParam}&details=${encodeURIComponent(exchangeError.message)}`)
     }
 
-    console.log('Successfully exchanged code for session:', {
+    console.log('[OAuth Callback] Successfully exchanged code for session:', {
       hasSession: !!sessionData?.session,
       hasUser: !!sessionData?.user,
       userId: sessionData?.user?.id,
-      userEmail: sessionData?.user?.email
+      userEmail: sessionData?.user?.email,
+      sessionAccessToken: !!sessionData?.session?.access_token,
+      sessionRefreshToken: !!sessionData?.session?.refresh_token,
+      sessionExpiresAt: sessionData?.session?.expires_at
     })
 
     // Get the user to check their role
@@ -133,7 +149,7 @@ export async function GET(request: Request) {
         .from('users')
         .select('role')
         .eq('id', user.id)
-        .single()
+        .single() as { data: Pick<User, 'role'> | null; error: any }
 
       if (profileError) {
         console.error('Failed to get user profile:', profileError)
@@ -149,7 +165,7 @@ export async function GET(request: Request) {
         return NextResponse.redirect(`${origin}/dashboard`, { status: 302 })
       }
 
-      console.log('User profile found:', { role: profile.role })
+      console.log('User profile found:', { role: (profile as any)?.role })
 
       // Redirect based on role
       if (profile?.role === 'pending') {

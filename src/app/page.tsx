@@ -1,15 +1,9 @@
 'use client'
 
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { signInWithGoogle } from "@/lib/auth";
 import { useState } from "react";
+
 
 function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -56,33 +50,28 @@ export default function LoginPage() {
     }
   };
 
+
   return (
     <main className="flex items-center justify-center h-screen bg-background">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">Sign in</CardTitle>
-          <CardDescription>to continue to Parsley</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-4">
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={handleGoogleSignIn}
-              disabled={isLoading}
-            >
-              <GoogleIcon className="mr-2 h-4 w-4" />
-              {isLoading ? 'Signing in...' : 'Sign in with Google'}
-            </Button>
+      <div className="w-full max-w-sm">
+        <div className="flex flex-col gap-4">
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={handleGoogleSignIn}
+            disabled={isLoading}
+          >
+            <GoogleIcon className="mr-2 h-4 w-4" />
+            {isLoading ? 'Signing in...' : 'Sign in with Google'}
+          </Button>
 
-            {error && (
-              <div className="text-sm text-destructive text-center">
-                {error}
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+          {error && (
+            <div className="text-sm text-destructive text-center">
+              {error}
+            </div>
+          )}
+        </div>
+      </div>
     </main>
   );
 }

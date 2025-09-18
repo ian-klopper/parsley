@@ -332,46 +332,9 @@ export default function Dashboard() {
               <PlusCircle className="w-4 h-4 mr-2" />
               {createJobMutation.isPending ? 'Creating...' : 'New Job'}
             </Button>
-
-            <ScrollArea className="flex-1">
-              <div className="space-y-2">
-                {users.filter(u => u.role === 'admin').map((admin) => (
-                  <div key={admin.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/50">
-                    <Avatar className="w-8 h-8">
-                      <AvatarFallback
-                        style={getUserColor(admin, theme, mounted)}
-                      >
-                        {admin.initials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1">
-                        <p className="text-sm font-medium truncate">{admin.full_name || admin.email}</p>
-                        <Crown className="w-3 h-3 text-yellow-500 flex-shrink-0" />
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate">{admin.email}</p>
-                    </div>
-                  </div>
-                ))}
-                {users.filter(u => u.role === 'user').map((member) => (
-                  <div key={member.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50">
-                    <Avatar className="w-8 h-8">
-                      <AvatarFallback
-                        style={getUserColor(member, theme, mounted)}
-                      >
-                        {member.initials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{member.full_name || member.email}</p>
-                      <p className="text-xs text-muted-foreground truncate">{member.email}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
           </div>
         </ResizablePanel>
+
       </ResizablePanelGroup>
 
       {/* Create Job Dialog */}

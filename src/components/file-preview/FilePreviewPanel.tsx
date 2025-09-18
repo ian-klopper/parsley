@@ -161,7 +161,7 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ jobId }) => 
   if (documents.length === 0) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-500">
-        No files uploaded yet
+        {/* Empty state - no files */}
       </div>
     );
   }

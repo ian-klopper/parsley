@@ -42,25 +42,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Computed states
-  const isAuthenticated = Boolean(user)
-  const isPendingApproval = Boolean(user && !userProfile)
+  const isAuthenticated = !!user
+  const isPendingApproval = !!userProfile && userProfile.role === 'pending'
 
-  const clearError = useCallback(() => {
-    setError(null)
-  }, [])
-
-  const refreshProfile = useCallback(async () => {
+  const updateUserProfile = useCallback(async (user: AuthUser | null) => {
     if (!user) {
       setUserProfile(null)
       setHasAccess(false)
       setIsAdmin(false)
-      setError(null)
       return
     }
 
     try {
       setError(null)
+
       const { data: profile, error } = await UserService.getCurrentUser()
 
       if (error) {
@@ -75,34 +70,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         // profile can be null for new users - this is normal
         setUserProfile(profile)
-        setHasAccess(profile?.role === 'admin' || profile?.role === 'user')
-        setIsAdmin(profile?.role === 'admin')
+        setHasAccess(profile ? profile.role !== 'pending' : false)
+        setIsAdmin(profile ? profile.role === 'admin' : false)
       }
     } catch (err) {
+      console.error('Error updating user profile:', err)
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch user profile'
       setError(errorMessage)
       setUserProfile(null)
       setHasAccess(false)
       setIsAdmin(false)
     }
-  }, [user])
+  }, [])
+
+  const refreshProfile = useCallback(async () => {
+    if (user) {
+      await updateUserProfile(user)
+    }
+  }, [user, updateUserProfile])
+
+  useEffect(() => {
+    updateUserProfile(user)
+  }, [user, updateUserProfile])
 
   useEffect(() => {
     // Get initial user
     const getUser = async () => {
+      console.log('[AuthContext] Getting initial user...')
       try {
         const { data: { user }, error } = await supabase.auth.getUser()
-
         if (error) {
-          throw new Error(`Authentication error: ${error.message}`)
+          console.warn('[AuthContext] Failed to get user:', error.message)
+          // Don't throw error for missing session - this is normal for unauthenticated users
+          setUser(null)
+        } else {
+          console.log('[AuthContext] User retrieved:', { id: user?.id, email: user?.email })
+          setUser(user)
         }
-
-        setUser(user ?? null)
-        setLoading(false)
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to get user session'
-        setError(errorMessage)
+      } catch (error) {
+        console.warn('[AuthContext] Error getting user:', error)
         setUser(null)
+      } finally {
         setLoading(false)
       }
     }
@@ -112,16 +120,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('[AuthContext] Auth state change:', event, {
+          hasSession: !!session,
+          hasUser: !!session?.user,
+          userId: session?.user?.id,
+          userEmail: session?.user?.email,
+          sessionAccessToken: !!session?.access_token,
+          sessionRefreshToken: !!session?.refresh_token
+        })
         try {
           // Clear previous errors when auth state changes
           setError(null)
-
-          // For client-side auth state changes, session.user is safe to use
           setUser(session?.user ?? null)
           setLoading(false)
-        } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : 'Authentication state change error'
-          setError(errorMessage)
+        } catch (error) {
+          console.error('[AuthContext] Error in auth state change:', error)
           setUser(null)
           setLoading(false)
         }
@@ -131,30 +144,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  useEffect(() => {
-    if (user && !loading) {
-      refreshProfile()
-    } else if (!user) {
-      setUserProfile(null)
-      setHasAccess(false)
-      setIsAdmin(false)
-      setError(null)
-    }
-  }, [user, loading, refreshProfile])
-
   const signOut = async () => {
     try {
       setError(null)
       const { error } = await supabase.auth.signOut()
+      if (error) throw error
 
-      if (error) {
-        throw new Error(`Sign out failed: ${error.message}`)
-      }
+      // Clear state
+      setUser(null)
+      setUserProfile(null)
+      setHasAccess(false)
+      setIsAdmin(false)
     } catch (err) {
+      console.error('Error signing out:', err)
       const errorMessage = err instanceof Error ? err.message : 'Failed to sign out'
       setError(errorMessage)
       throw err
     }
+  }
+
+  const clearError = () => {
+    setError(null)
   }
 
   return (
@@ -169,16 +179,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       error,
       signOut,
       refreshProfile,
-      clearError
+      clearError,
     }}>
       {children}
     </AuthContext.Provider>
   )
 }
 
-export function useAuth() {
+export const useAuth = () => {
   const context = useContext(AuthContext)
-  if (!context) {
+  if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider')
   }
   return context

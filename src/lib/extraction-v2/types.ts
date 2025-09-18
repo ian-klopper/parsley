@@ -123,8 +123,9 @@ export interface ExtractionBatch {
   isImage: boolean;
   contentType?: string; // MIME type for images: 'image/jpeg' or 'application/pdf'
   tokens: number;
-  model: 'pro' | 'flash' | 'flash-lite';
+  model: 'pro' | 'flash' | 'flashLite';
   sourceRefs: DocumentLocation[];
+  fileRefs?: Array<{ uri: string; mimeType: string }>; // File references for cost optimization
 }
 
 export interface TokenUsage {
