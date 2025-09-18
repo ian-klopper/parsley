@@ -29,10 +29,10 @@
   ],
   "functions": {
     "src/app/auth/callback/route.ts": {
-      "maxDuration": 600
+      "maxDuration": 300
     },
     "src/app/api/**/route.ts": {
-      "maxDuration": 600
+      "maxDuration": 300
     }
   }
 }
