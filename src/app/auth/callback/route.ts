@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase-server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import type { User } from '@/types/database'
+import type { User, UserInsert } from '@/types/database'
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
@@ -154,25 +154,146 @@ export async function GET(request: Request) {
       if (profileError) {
         console.error('Failed to get user profile:', profileError)
 
-        // If it's a "not found" error, this might be first-time login
+        // If it's a "not found" error, this is a first-time login - create the profile
         if (profileError.code === 'PGRST116' || profileError.message.includes('No rows returned')) {
-          console.log('No profile found (first-time login), redirecting to dashboard')
-          return NextResponse.redirect(`${origin}/dashboard`, { status: 302 })
+          console.log('No profile found (first-time login), creating user profile...')
+          
+          // Create user profile with retry logic for production reliability
+          let createAttempts = 0
+          let newProfile = null
+          let createError = null
+
+          while (createAttempts < 3 && !newProfile) {
+            createAttempts++
+            console.log(`[OAuth Callback] User creation attempt ${createAttempts}/3`)
+
+            const userInsert: UserInsert = {
+              id: user.id,
+              email: user.email || '',
+              full_name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || '',
+              role: 'pending' as const,
+              avatar_url: user.user_metadata?.avatar_url || null,
+              color_index: Math.floor(Math.random() * 12)
+            }
+
+            // Simple approach - create user and handle errors gracefully
+            try {
+              const insertResult = await fetch('/api/users/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  id: user.id,
+                  email: user.email || '',
+                  full_name: userInsert.full_name,
+                  avatar_url: userInsert.avatar_url,
+                  color_index: userInsert.color_index
+                })
+              })
+
+              if (insertResult.ok) {
+                const userData = await insertResult.json()
+                newProfile = { role: userData.role || 'pending' }
+                createError = null
+                console.log('✅ User created via API endpoint')
+              } else {
+                const errorData = await insertResult.json()
+                createError = { message: errorData.error || 'API creation failed' }
+              }
+            } catch (apiError) {
+              console.log('API approach failed, trying direct database...')
+              // Fallback to direct approach with any casting
+              try {
+                const directResult = await (supabase as any)
+                  .from('users')
+                  .insert([{
+                    id: user.id,
+                    email: user.email || '',
+                    full_name: userInsert.full_name,
+                    role: 'pending',
+                    avatar_url: userInsert.avatar_url,
+                    color_index: userInsert.color_index
+                  }])
+                  .select('role')
+                  .single()
+
+                newProfile = directResult.data
+                createError = directResult.error
+              } catch (dbError) {
+                createError = { message: 'All creation methods failed' }
+              }
+            }
+
+            if (!createError) {
+              console.log('✅ User profile created successfully on attempt', createAttempts)
+              break
+            }
+
+            if (createError.code === '23505') {
+              // User already exists (race condition), try to fetch it
+              console.log('User already exists, fetching existing profile...')
+              const { data: existingProfile, error: fetchError } = await supabase
+                .from('users')
+                .select('role')
+                .eq('id', user.id)
+                .single() as { data: Pick<User, 'role'> | null; error: any }
+
+              if (!fetchError && existingProfile) {
+                newProfile = existingProfile
+                createError = null
+                break
+              }
+            }
+
+            if (createAttempts < 3) {
+              console.log(`Attempt ${createAttempts} failed, retrying in 1s...`, createError.message)
+              await new Promise(resolve => setTimeout(resolve, 1000))
+            }
+          }
+
+          if (createError && !newProfile) {
+            console.error('Failed to create user profile after all attempts:', createError)
+            // Still redirect to dashboard, but user might have issues
+            return NextResponse.redirect(`${origin}/dashboard?auth_error=profile_creation_failed`, { status: 302 })
+          }
+
+          console.log('✅ User profile ready:', { role: newProfile?.role })
+          
+          // Redirect based on the user's role
+          if (newProfile?.role === 'pending') {
+            console.log('Redirecting new user to pending page')
+            return NextResponse.redirect(`${origin}/pending`, { status: 302 })
+          } else {
+            console.log('Redirecting new user to dashboard')
+            return NextResponse.redirect(`${origin}/dashboard`, { status: 302 })
+          }
         }
 
         // For other database errors, still try dashboard but log the issue
         console.error('Database error during profile lookup, redirecting to dashboard anyway')
-        return NextResponse.redirect(`${origin}/dashboard`, { status: 302 })
+        return NextResponse.redirect(`${origin}/dashboard?auth_error=database_error`, { status: 302 })
       }
 
       console.log('User profile found:', { role: (profile as any)?.role })
 
-      // Redirect based on role
+      // Redirect based on role with enhanced logging
       if (profile?.role === 'pending') {
-        console.log('Redirecting to pending page')
-        return NextResponse.redirect(`${origin}/pending`, { status: 302 })
+        console.log('✅ Redirecting to pending page - user has pending role')
+        console.log('Redirect URL:', `${origin}/pending`)
+        const response = NextResponse.redirect(`${origin}/pending`, { status: 302 })
+        
+        // Ensure session cookies are properly set for the redirect
+        const cookieStore = await cookies()
+        const allCookies = cookieStore.getAll()
+        const authCookies = allCookies.filter(cookie => 
+          cookie.name.includes('supabase') || 
+          cookie.name.includes('auth') ||
+          cookie.name.includes('session')
+        )
+        
+        console.log('Auth cookies being preserved:', authCookies.map(c => c.name))
+        return response
       } else {
-        console.log('Redirecting to dashboard')
+        console.log('✅ Redirecting to dashboard - user role:', profile?.role)
         return NextResponse.redirect(`${origin}/dashboard`, { status: 302 })
       }
     } else {

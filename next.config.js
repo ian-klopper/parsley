@@ -10,8 +10,15 @@ const nextConfig = {
   },
   assetPrefix: process.env.NODE_ENV === 'production' ? undefined : '',
   allowedDevOrigins: [
+    // Google Cloud Workstations
     '8080-firebase-parsley-1757521220142.cluster-thle3dudhffpwss7zs5hxaeu2o.cloudworkstations.dev',
-    '3000-firebase-parsley-1757521220142.cluster-thle3dudhffpwss7zs5hxaeu2o.cloudworkstations.dev'
+    '3000-firebase-parsley-1757521220142.cluster-thle3dudhffpwss7zs5hxaeu2o.cloudworkstations.dev',
+    // Local development origins
+    'local-origin.dev',
+    '*.local-origin.dev',
+    // Common localhost variations
+    'localhost',
+    '127.0.0.1'
   ],
   env: {
     GOOGLE_AI_API_KEY: process.env.GOOGLE_AI_API_KEY,
