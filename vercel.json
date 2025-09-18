@@ -29,13 +29,10 @@
   ],
   "functions": {
     "src/app/auth/callback/route.ts": {
-      "maxDuration": 10
-    },
-    "src/app/api/jobs/simple-extract/route.ts": {
       "maxDuration": 600
     },
     "src/app/api/**/route.ts": {
-      "maxDuration": 10
+      "maxDuration": 600
     }
   }
 }
