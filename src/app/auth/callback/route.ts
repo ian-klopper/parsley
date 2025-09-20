@@ -3,6 +3,23 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 
 /**
+ * ENHANCED ORIGIN DETECTION for Vercel deployments
+ * Handles preview URLs correctly to prevent double-login
+ */
+function getCallbackOrigin(request: Request): string {
+  // Try to get the origin from headers first (for Vercel)
+  const host = request.headers.get('host')
+  const protocol = request.headers.get('x-forwarded-proto') || 'https'
+
+  if (host) {
+    return `${protocol}://${host}`
+  }
+
+  // Fallback to request URL origin
+  return new URL(request.url).origin
+}
+
+/**
  * PRODUCTION-OPTIMIZED OAuth Callback Handler
  * Streamlined, secure, and fast authentication flow
  */
@@ -10,14 +27,18 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
   const error = requestUrl.searchParams.get('error')
-  const origin = requestUrl.origin
+
+  // ENHANCED ORIGIN DETECTION for Vercel deployments
+  const origin = getCallbackOrigin(request)
 
   // DEVELOPMENT LOGGING ONLY
   if (process.env.NODE_ENV === 'development') {
     console.log('[Callback] Processing OAuth callback:', {
       hasCode: !!code,
       hasError: !!error,
-      error
+      error,
+      origin,
+      requestUrl: requestUrl.toString()
     })
   }
 

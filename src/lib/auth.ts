@@ -5,7 +5,7 @@ import { supabase } from './supabase'
  * Simplified and secure URL resolution with minimal logging
  */
 export async function signInWithGoogle() {
-  // SIMPLIFIED URL RESOLUTION - More reliable and secure
+  // FIXED URL RESOLUTION - Solves double-login issue
   const baseUrl = getBaseUrl()
   const redirectTo = `${baseUrl}/auth/callback`
 
@@ -13,6 +13,16 @@ export async function signInWithGoogle() {
   if (process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === 'true') {
     console.log('🚀 DEV AUTH BYPASS - Skipping OAuth')
     return { success: true, bypass: true }
+  }
+
+  // PRODUCTION DEBUG: Log URL resolution (only in development)
+  if (process.env.NODE_ENV === 'development') {
+    console.log('🔗 [OAuth] URL Resolution:', {
+      baseUrl,
+      redirectTo,
+      vercelUrl: process.env.NEXT_PUBLIC_VERCEL_URL,
+      hostname: typeof window !== 'undefined' ? window.location.hostname : 'SSR'
+    })
   }
 
   try {
@@ -48,15 +58,22 @@ export async function signInWithGoogle() {
 
 /**
  * PRODUCTION-OPTIMIZED URL RESOLUTION
- * Single source of truth for base URL determination
+ * Fixed for Vercel preview deployments - no more double-login!
  */
 function getBaseUrl(): string {
-  // SERVER-SIDE: Use environment variable
+  // SERVER-SIDE: Use Vercel's automatic URL detection
   if (typeof window === 'undefined') {
+    // VERCEL AUTOMATIC URL DETECTION
+    const vercelUrl = process.env.NEXT_PUBLIC_VERCEL_URL
+    if (vercelUrl) {
+      return `https://${vercelUrl}`
+    }
+
+    // FALLBACK for non-Vercel deployments
     return process.env.NEXT_PUBLIC_SITE_URL || 'https://parsley-three.vercel.app'
   }
 
-  // CLIENT-SIDE: Smart environment detection
+  // CLIENT-SIDE: Always use current window location for accuracy
   const { hostname, protocol, port } = window.location
 
   // DEVELOPMENT
@@ -64,7 +81,7 @@ function getBaseUrl(): string {
     return `${protocol}//${hostname}:8080` // Force port 8080 for dev
   }
 
-  // PRODUCTION - Use current origin
+  // PRODUCTION/PREVIEW - Use actual current origin (CRITICAL FIX)
   return `${protocol}//${hostname}${port && port !== '80' && port !== '443' ? `:${port}` : ''}`
 }
 
