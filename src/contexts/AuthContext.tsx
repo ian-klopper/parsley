@@ -42,6 +42,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // DEVELOPMENT AUTH BYPASS - ABSOLUTE POWER MODE
+  const isDevBypass = process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === 'true'
+  const isDevAdmin = process.env.NEXT_PUBLIC_DEV_ADMIN === 'true'
+
   const isAuthenticated = !!user
   const isPendingApproval = !!userProfile && userProfile.role === 'pending'
 
@@ -94,7 +98,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, updateUserProfile])
 
   useEffect(() => {
-    // Get initial user
+    // DEVELOPMENT BYPASS - INJECT MOCK GOD USER
+    if (isDevBypass) {
+      console.log('🚀 [AuthContext] DEV BYPASS ACTIVE - INJECTING MOCK SUPREME USER!')
+
+      // Create mock authenticated user
+      const mockUser: AuthUser = {
+        id: process.env.NEXT_PUBLIC_DEV_USER_ID || 'dev-mock-001',
+        email: process.env.NEXT_PUBLIC_DEV_USER_EMAIL || 'dev@localhost.com',
+        aud: 'authenticated',
+        role: 'authenticated',
+        app_metadata: {},
+        user_metadata: {
+          full_name: 'Development Supreme User',
+          avatar_url: null
+        },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      } as AuthUser
+
+      // Create mock user profile with ULTIMATE POWER
+      const mockProfile: User = {
+        id: mockUser.id,
+        email: mockUser.email!,
+        full_name: 'Development Supreme User',
+        role: isDevAdmin ? 'admin' : 'active',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        avatar_url: null,
+        color: '#FF6B6B'
+      }
+
+      // SET THE SUPREME STATE
+      setUser(mockUser)
+      setUserProfile(mockProfile)
+      setHasAccess(true)
+      setIsAdmin(isDevAdmin)
+      setLoading(false)
+      setError(null)
+
+      console.log('👑 [AuthContext] MOCK USER SUPREME POWERS ACTIVATED:', {
+        userId: mockUser.id,
+        email: mockUser.email,
+        role: mockProfile.role,
+        isAdmin: isDevAdmin,
+        hasAccess: true
+      })
+
+      return // Skip normal auth flow
+    }
+
+    // Normal auth flow for mortals
     const getUser = async () => {
       console.log('[AuthContext] Getting initial user...')
       try {
@@ -142,7 +197,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     )
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, [isDevBypass, isDevAdmin])
 
   const signOut = async () => {
     try {

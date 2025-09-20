@@ -2,10 +2,27 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
-  console.log(`[Middleware] Processing request: ${request.method} ${request.url}`)
+  // PRODUCTION OPTIMIZATION: Minimal logging
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[Middleware] ${request.method} ${request.nextUrl.pathname}`)
+  }
 
-  // Skip middleware for API routes
-  if (request.nextUrl.pathname.startsWith('/api')) {
+  // DEVELOPMENT AUTH BYPASS - THE SUPREME OVERRIDE
+  if (process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === 'true') {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Middleware] 🚀 DEV AUTH BYPASS ENABLED')
+    }
+    return NextResponse.next()
+  }
+
+  // PERFORMANCE: Skip middleware for static assets and API routes
+  const { pathname } = request.nextUrl
+  if (
+    pathname.startsWith('/api') ||
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon') ||
+    pathname.match(/\.(jpg|jpeg|png|gif|webp|svg|ico|js|css|woff|woff2)$/)
+  ) {
     return NextResponse.next()
   }
 
@@ -80,40 +97,40 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Refresh session if expired - required for Server Components
-  console.log('[Middleware] Attempting session refresh...')
+  // PRODUCTION-OPTIMIZED SESSION CHECK
   try {
     const { data: { user }, error } = await supabase.auth.getUser()
-    
-    console.log('[Middleware] Session refresh result:', {
-      hasUser: !!user,
-      userId: user?.id,
-      hasError: !!error,
-      error: error?.message || 'none'
-    })
 
-    // Check if this is a protected route
-    const isAuthRoute = request.nextUrl.pathname.startsWith('/auth')
-    const isHomePage = request.nextUrl.pathname === '/'
-    const isPublicRoute = isHomePage || isAuthRoute || request.nextUrl.pathname.startsWith('/test-')
+    // DEVELOPMENT LOGGING ONLY
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Middleware] Auth check:', {
+        hasUser: !!user,
+        userId: user?.id?.substring(0, 8) + '...',
+        hasError: !!error
+      })
+    }
 
-    // If user is not authenticated and trying to access protected routes
+    // STREAMLINED ROUTE PROTECTION
+    const isPublicRoute =
+      pathname === '/' ||
+      pathname.startsWith('/auth') ||
+      pathname.startsWith('/test-')
+
+    // FAST REDIRECT FOR UNAUTHENTICATED USERS
     if (!user && !isPublicRoute) {
-      console.log('[Middleware] Redirecting to home page - no authentication')
       const url = request.nextUrl.clone()
       url.pathname = '/'
       return NextResponse.redirect(url)
     }
 
-    // If user is authenticated but has no profile, they might be pending
-    if (user && !isAuthRoute && !isHomePage) {
-      // Let the pages handle profile checks, don't block here
-      console.log('[Middleware] Authenticated user accessing:', request.nextUrl.pathname)
-    }
+    // PRODUCTION: Let pages handle detailed user profile checks
+    // Middleware should only handle authentication, not authorization
 
   } catch (error) {
-    console.warn('[Middleware] Session refresh failed:', error)
-    // Continue with the request even if session refresh fails
+    // PRODUCTION: Silent failure, let pages handle auth state
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('[Middleware] Session check failed:', error)
+    }
   }
 
   return response

@@ -29,6 +29,27 @@ export class UserService {
 
   // Get current user profile
   static async getCurrentUser(): Promise<{ data: User | null; error: string | null }> {
+    // DEVELOPMENT BYPASS - RETURN MOCK SUPREME USER
+    if (process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === 'true') {
+      console.log('🚀 [UserService] DEV BYPASS - RETURNING MOCK SUPREME USER!')
+
+      const mockUser: User = {
+        id: process.env.NEXT_PUBLIC_DEV_USER_ID || 'dev-mock-001',
+        email: process.env.NEXT_PUBLIC_DEV_USER_EMAIL || 'dev@localhost.com',
+        full_name: 'Development Supreme User',
+        role: process.env.NEXT_PUBLIC_DEV_ADMIN === 'true' ? 'admin' : 'user',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        approved_at: new Date().toISOString(),
+        approved_by: 'system',
+        avatar_url: null,
+        color_index: 0,
+        initials: 'DS'
+      }
+
+      return { data: mockUser, error: null }
+    }
+
     try {
       const result = await apiClient.getCurrentUser();
       return { data: result.data, error: null };

@@ -2,7 +2,8 @@
 
 import { Button } from "@/components/ui/button";
 import { signInWithGoogle } from "@/lib/auth";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 
 function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
@@ -28,6 +29,38 @@ function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  // DEVELOPMENT AUTO-LOGIN BYPASS - SUPREME POWER!
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === 'true') {
+      console.log('🚀 [LoginPage] DEV BYPASS ACTIVE - SKIPPING OAUTH, REDIRECTING TO DASHBOARD!')
+      router.push('/dashboard');
+      return;
+    }
+
+    // PRODUCTION: Handle URL error parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const authError = urlParams.get('auth_error');
+    const oauthError = urlParams.get('error');
+
+    if (authError || oauthError) {
+      // PRODUCTION-SAFE ERROR MESSAGES
+      const errorMessages: Record<string, string> = {
+        'access_denied': 'Access was denied. Please try again.',
+        'invalid_grant': 'Authentication expired. Please try again.',
+        'redirect_mismatch': 'Configuration error. Please contact support.',
+        'exchange_failed': 'Authentication failed. Please try again.',
+        'profile_creation_failed': 'Account setup failed. Please try again.'
+      };
+
+      const errorKey = authError || oauthError || 'unknown';
+      setError(errorMessages[errorKey] || 'Authentication failed. Please try again.');
+
+      // CLEAN URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [router]);
 
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
@@ -36,16 +69,22 @@ export default function LoginPage() {
     try {
       const result = await signInWithGoogle();
 
+      // HANDLE DEV BYPASS
+      if (result.bypass) {
+        router.push('/dashboard');
+        return;
+      }
+
       if (!result.success) {
-        setError(result.error || 'Failed to sign in with Google');
+        setError(result.error || 'Authentication failed. Please try again.');
         setIsLoading(false);
       } else {
-        // If successful, the redirect will happen automatically
-        // Keep loading state until redirect happens
+        // PRODUCTION: Redirect happens automatically via OAuth
+        // Keep loading state to show user something is happening
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      setError(errorMessage);
+      // PRODUCTION-SAFE ERROR MESSAGES
+      setError('Authentication service is temporarily unavailable.');
       setIsLoading(false);
     }
   };

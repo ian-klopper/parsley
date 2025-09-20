@@ -7,6 +7,7 @@ import { ThemeProvider } from '@/components/ThemeProvider'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ErrorPanel } from '@/components/ErrorPanel'
 import { QueryProvider } from '@/providers/QueryProvider'
+import { DevBanner } from '@/components/DevBanner'
 import '@/lib/error-handler' // Initialize global error handler
 
 const inter = Inter({
@@ -36,6 +37,7 @@ export default function RootLayout({
           <QueryProvider>
             <AuthProvider>
               <ErrorBoundary>
+                <DevBanner />
                 {children}
                 <ErrorPanel />
               </ErrorBoundary>
